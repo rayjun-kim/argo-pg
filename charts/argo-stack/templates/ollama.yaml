@@ -35,6 +35,8 @@ spec:
   storageClassName: {{ . }}
   {{- end }}
 ---
+# Ollama Deployment: starts immediately without waiting for model download.
+# Models are pulled asynchronously by the ollama-model-pull Job below.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -45,7 +47,7 @@ metadata:
 spec:
   replicas: 1
   strategy:
-    type: Recreate    # PVC is RWO; rolling update would block on volume attach
+    type: Recreate
   selector:
     matchLabels:
       {{- include "argo-stack.selectorLabels" . | nindent 6 }}
@@ -66,35 +68,6 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- end }}
-      initContainers:
-        # Pull configured models on first startup. Re-runs are cheap because
-        # `ollama pull` is a no-op when the model is already present.
-        - name: model-puller
-          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
-          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              set -e
-              # Start the daemon in the background so `ollama pull` can talk to it.
-              ollama serve &
-              SERVER_PID=$!
-              # Wait for daemon
-              for i in $(seq 1 30); do
-                if ollama list > /dev/null 2>&1; then break; fi
-                sleep 2
-              done
-              {{- range .Values.ollama.pullModels }}
-              echo "Pulling model: {{ . }}"
-              ollama pull {{ . | quote }}
-              {{- end }}
-              # Stop daemon cleanly so the main container can take over.
-              kill $SERVER_PID 2>/dev/null || true
-              wait $SERVER_PID 2>/dev/null || true
-              echo "models ready"
-          volumeMounts:
-            - name: models
-              mountPath: /root/.ollama
       containers:
         - name: ollama
           image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
@@ -129,6 +102,68 @@ spec:
               {{- if .Values.ollama.gpu.enabled }}
               nvidia.com/gpu: {{ .Values.ollama.gpu.count }}
               {{- end }}
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "argo-stack.ollamaService" . }}-models
+---
+# Async model pull Job: runs independently of --wait.
+# Pulls models in the background while the rest of the stack comes up.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "argo-stack.ollamaService" . }}-model-pull
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama-model-pull
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # No backoffLimit cap — model pull should retry until success.
+  backoffLimit: 10
+  activeDeadlineSeconds: 7200   # 2 hours max
+  template:
+    metadata:
+      labels:
+        {{- include "argo-stack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ollama-model-pull
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: puller
+          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+              OLLAMA_HOST={{ include "argo-stack.ollamaService" . }}:{{ .Values.ollama.service.port }}
+
+              echo "Waiting for Ollama to be ready..."
+              for i in $(seq 1 60); do
+                if curl -sf "http://${OLLAMA_HOST}/api/tags" > /dev/null 2>&1; then
+                  echo "Ollama ready."
+                  break
+                fi
+                echo "  waiting ($i)..."
+                sleep 5
+              done
+
+              {{- range .Values.ollama.pullModels }}
+              echo "Pulling {{ . }}..."
+              OLLAMA_HOST=${OLLAMA_HOST} ollama pull {{ . | quote }}
+              echo "{{ . }} ready."
+              {{- end }}
+
+              echo "All models pulled successfully."
+          env:
+            - name: OLLAMA_HOST
+              value: "{{ include "argo-stack.ollamaService" . }}:{{ .Values.ollama.service.port }}"
           volumeMounts:
             - name: models
               mountPath: /root/.ollama
