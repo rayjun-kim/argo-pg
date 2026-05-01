@@ -67,5 +67,6 @@ jobs:
           charts_dir: charts
           mark_as_latest: true
           skip_existing: true
+          dependency_update: true
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
