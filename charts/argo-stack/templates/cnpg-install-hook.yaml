@@ -1,0 +1,88 @@
+{{- /*
+  Pre-install / pre-upgrade hook: ensures the CloudNativePG operator and its
+  CRDs are present before the ARGO Cluster resource is applied.
+
+  Uses `helm upgrade --install` so it is idempotent — re-running does nothing
+  if cnpg is already installed at the right version.
+
+  The Job runs with the same ServiceAccount that Helm uses, which must have
+  cluster-admin (or equivalent) permissions to install CRDs and cluster-scoped
+  resources. On most self-managed clusters this is the default.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "argo-stack.fullname" . }}-cnpg-installer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "argo-stack.fullname" . }}-cnpg-installer
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "argo-stack.fullname" . }}-cnpg-installer
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "argo-stack.fullname" . }}-cnpg-install
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "argo-stack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: cnpg-installer
+    spec:
+      serviceAccountName: {{ include "argo-stack.fullname" . }}-cnpg-installer
+      restartPolicy: OnFailure
+      containers:
+        - name: installer
+          image: alpine/helm:3.16.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+
+              echo "Adding CNPG helm repo..."
+              helm repo add cnpg https://cloudnative-pg.github.io/charts
+              helm repo update
+
+              echo "Installing/upgrading CNPG operator..."
+              helm upgrade --install cnpg cnpg/cloudnative-pg \
+                --namespace cnpg-system \
+                --create-namespace \
+                --wait \
+                --timeout 5m
+
+              echo "Waiting for CNPG CRDs to be established..."
+              kubectl wait --for=condition=established \
+                crd/clusters.postgresql.cnpg.io \
+                --timeout=120s
+
+              echo "CNPG operator ready."

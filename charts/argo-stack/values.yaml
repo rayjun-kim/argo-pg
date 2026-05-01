@@ -19,7 +19,7 @@ fullnameOverride: ""
 # Disable this if your cluster already runs cnpg-operator.
 # -----------------------------------------------------------------------------
 cloudnative-pg:
-  enabled: true
+  enabled: false  # Managed via pre-install hook. Override only if you want helm to own the CNPG operator.
 
 # -----------------------------------------------------------------------------
 # ARGO PostgreSQL Cluster (a Cluster resource managed by CNPG)
