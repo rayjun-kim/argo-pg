@@ -1,9 +1,5 @@
 name: Release Helm Chart
 
-# Publishes the Helm chart at /charts/argo-stack to a GitHub Pages branch
-# whenever the chart contents change on `main`. End users then add the
-# Pages URL as a Helm repo.
-
 on:
   push:
     branches:
@@ -14,7 +10,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # to push to the gh-pages branch
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   release:
@@ -53,9 +52,6 @@ jobs:
             fi
           done
 
-      # Render the chart with default values to make sure templates produce
-      # valid YAML. Catches issues that lint misses (missing helpers, bad
-      # indent, etc.).
       - name: Render charts
         run: |
           for d in charts/*/; do
@@ -70,5 +66,6 @@ jobs:
         with:
           charts_dir: charts
           mark_as_latest: true
+          skip_existing: true
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
