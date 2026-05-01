@@ -17,9 +17,9 @@ This repository ships a complete, helm-installable stack:
 
 ## Quick start
 
-### 1. CNPG Operator 설치 (최초 1회)
+### 1. Install CNPG Operator (once per cluster)
 
-CloudNativePG Operator는 클러스터 전체에 하나만 설치되어야 합니다.
+CloudNativePG Operator must be installed cluster-wide before ARGO.
 
 ```bash
 helm repo add cnpg https://cloudnative-pg.github.io/charts
@@ -30,7 +30,7 @@ helm install cnpg cnpg/cloudnative-pg \
   --wait
 ```
 
-### 2. ARGO 설치
+### 2. Install ARGO
 
 ```bash
 helm repo add argo https://rayjun-kim.github.io/argo-pg
@@ -42,11 +42,11 @@ helm install argo argo/argo-stack \
   --wait
 ```
 
-### 3. Langflow 접속
+### 3. Access Langflow
 
 ```bash
 kubectl -n argo port-forward svc/argo-argo-stack-langflow 7860:7860
-# 브라우저에서 http://localhost:7860 열기
+# Open http://localhost:7860 in your browser
 ```
 
 ---
