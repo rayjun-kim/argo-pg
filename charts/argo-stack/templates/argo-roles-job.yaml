@@ -27,7 +27,7 @@ spec:
       containers:
         - name: setup
           image: {{ .Values.postgresql.imageName | quote }}
-          command: ["/bin/sh", "-c"]
+          command: ["/bin/bash", "-c"]
           args:
             - |
               set -euo pipefail

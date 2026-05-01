@@ -114,11 +114,11 @@ ollama:
 
   # Models to pull on first startup. The init job runs `ollama pull` for each.
   pullModels:
-    - "llama3.2"          # small chat model, ~2GB
+    - "gemma4:e2b"        # small chat model, ~7GB
     - "nomic-embed-text"  # 768-dim embeddings, ~270MB
 
   # Default chat model (referenced by sample agents in the seed data)
-  defaultChatModel: "llama3.2"
+  defaultChatModel: "gemma4:e2b"
 
 # -----------------------------------------------------------------------------
 # Langflow
