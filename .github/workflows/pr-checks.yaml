@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   sql-test:
     name: ARGO schema bootstraps cleanly
@@ -37,7 +40,6 @@ jobs:
           PGPASSWORD: test
         run: |
           psql -h localhost -U postgres -d argo_test -At <<'SQL'
-            -- Expected counts must match the README table
             SELECT count(*) >= 19 FROM pg_tables  WHERE schemaname IN ('argo_private','argo_public');
             SELECT count(*) >= 12 FROM pg_views   WHERE schemaname IN ('argo_private','argo_public');
             SELECT count(*) >= 25 FROM pg_proc p
@@ -45,7 +47,7 @@ jobs:
               WHERE n.nspname IN ('argo_private','argo_public');
           SQL
 
-      - name: Smoke test create_agent + fn_next_step
+      - name: Smoke test
         env:
           PGPASSWORD: test
         run: |
@@ -55,19 +57,12 @@ jobs:
               "provider":"ollama","model_name":"llama3.2",
               "endpoint":"http://example:11434"
             }'::jsonb);
-
             SELECT argo_public.run_agent('ci_agent','hello world') AS info \gset
-
-            SELECT argo_public.fn_next_step(
-              ((:'info')::jsonb->>'task_id')::int
-            )::text;
-
+            SELECT argo_public.fn_next_step(((:'info')::jsonb->>'task_id')::int)::text;
             SELECT argo_public.fn_submit_result(
               ((:'info')::jsonb->>'task_id')::int,
               '{"action":"finish","final_answer":"ok"}'
             )::text;
-
-            -- Cleanup
             SELECT argo_public.drop_agent('ci_agent');
           SQL
 
@@ -110,8 +105,6 @@ jobs:
         with:
           version: v3.16.1
       - name: Sync chart files from repo root
-        # Keep chart-internal copies (files/argo--0.1.sql, files/components/,
-        # files/flows/) in sync with the canonical sources at the repo root.
         run: |
           set -e
           cp sql/argo--0.1.sql charts/argo-stack/files/argo--0.1.sql
@@ -130,8 +123,7 @@ jobs:
       - name: Validate rendered YAML
         run: |
           python3 - <<'PY'
-          import yaml, sys
-          docs = list(yaml.safe_load_all(open('/tmp/manifests.yaml')))
-          docs = [d for d in docs if d]
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open('/tmp/manifests.yaml')) if d]
           print(f"rendered {len(docs)} documents")
           PY
