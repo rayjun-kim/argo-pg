@@ -57,7 +57,7 @@ jobs:
           for d in charts/*/; do
             if [ -f "$d/Chart.yaml" ]; then
               echo "Rendering $d"
-              helm template _test "$d" > /dev/null
+              helm template test "$d" > /dev/null
             fi
           done
 
