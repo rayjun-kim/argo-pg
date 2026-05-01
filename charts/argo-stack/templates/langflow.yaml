@@ -88,7 +88,7 @@ spec:
         app.kubernetes.io/component: langflow
       annotations:
         # Bounce the deployment when components change (so new code is picked up).
-        checksum/components: {{ include (print $.Template.BasePath "/langflow.yaml") . | sha256sum }}
+        checksum/components: {{ include "argo-stack.fullname" . | sha256sum }}
     spec:
       initContainers:
         # Lay out the custom components in the directory layout Langflow expects:
