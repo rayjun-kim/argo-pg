@@ -1,0 +1,76 @@
+{{- if and .Values.postgresql.enabled .Values.argo.applySchema }}
+---
+# Sets passwords for argo_operator and argo_langflow after the schema (which
+# creates the roles as NOLOGIN) has been bootstrapped. Runs as a Helm post-install
+# hook so it happens once per release; on upgrade it re-applies the same
+# passwords from the kept Secret.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "argo-stack.fullname" . }}-argo-roles
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "argo-stack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: argo-role-init
+    spec:
+      serviceAccountName: {{ include "argo-stack.serviceAccountName" . }}
+      restartPolicy: OnFailure
+      containers:
+        - name: setup
+          image: {{ .Values.postgresql.imageName | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              # Wait until the cluster's primary RW endpoint is reachable.
+              for i in $(seq 1 60); do
+                if pg_isready -h "$PGHOST" -p "$PGPORT" -U postgres > /dev/null 2>&1; then
+                  echo "postgres ready"; break
+                fi
+                echo "waiting for postgres... ($i)"
+                sleep 5
+              done
+
+              # Use the CNPG-provided superuser secret to grant LOGIN + password.
+              psql -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U postgres -d "$PGDATABASE" <<-SQL
+                ALTER ROLE argo_operator   WITH LOGIN PASSWORD '${ARGO_OPERATOR_PASSWORD}';
+                ALTER ROLE argo_langflow   WITH LOGIN PASSWORD '${ARGO_LANGFLOW_PASSWORD}';
+                -- argo_operator must own its own jobs, so let it create sessions
+                -- and call all argo_public functions. Already granted by the
+                -- schema; the LOGIN above completes the picture.
+              SQL
+              echo "ARGO roles configured"
+          env:
+            - name: PGHOST
+              value: {{ include "argo-stack.pgRwService" . | quote }}
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: {{ .Values.postgresql.initdb.database | quote }}
+            - name: PGSSLMODE
+              value: prefer
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "argo-stack.pgClusterName" . }}-superuser
+                  key: password
+            - name: ARGO_OPERATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "argo-stack.fullname" . }}-argo-passwords
+                  key: ARGO_OPERATOR_PASSWORD
+            - name: ARGO_LANGFLOW_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "argo-stack.fullname" . }}-argo-passwords
+                  key: ARGO_LANGFLOW_PASSWORD
+{{- end }}

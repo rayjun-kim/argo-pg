@@ -1,0 +1,191 @@
+{
+  "title": "ARGO Overview",
+  "uid": "argo-overview",
+  "tags": ["argo", "agents"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "label": "PostgreSQL",
+        "query": "postgres",
+        "current": { "selected": false }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active sessions",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, count(*)::int AS value FROM argo_private.sessions WHERE status = 'active'",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "stat",
+      "title": "Tasks running",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, count(*)::int AS value FROM argo_private.tasks WHERE status = 'running'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Tasks waiting",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, count(*)::int AS value FROM argo_private.tasks WHERE status IN ('waiting','pending')",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Pending approvals",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, count(*)::int AS value FROM argo_private.human_approvals WHERE status = 'pending'",
+          "refId": "A"
+        }
+      ],
+      "options": { "colorMode": "value", "graphMode": "none" }
+    },
+    {
+      "type": "stat",
+      "title": "Failed (24h)",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, count(*)::int AS value FROM argo_private.tasks WHERE status='failed' AND updated_at > now()-interval '24 hours'",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red",    "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Stale running tasks",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, count(*)::int AS value FROM argo_public.v_stale_tasks",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red",   "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Task throughput by status",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time, status, count(*)::int FROM argo_private.tasks WHERE $__timeFilter(created_at) GROUP BY 1,2 ORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool calls (last 6h)",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('minute', te.executed_at) AS time, t.name AS metric, count(*)::int AS value FROM argo_private.tool_executions te JOIN argo_private.tool_registry t ON t.tool_id = te.tool_id WHERE $__timeFilter(te.executed_at) GROUP BY 1,2 ORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Active sessions",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT s.session_id, am.role_name AS agent, s.goal, s.status, s.started_at FROM argo_private.sessions s JOIN argo_private.agent_meta am ON am.agent_id = s.agent_id WHERE s.status='active' ORDER BY s.started_at DESC LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Tool stats",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT name, tool_type, total_calls, error_count, avg_duration_ms, last_called_at FROM argo_public.v_tool_stats ORDER BY total_calls DESC NULLS LAST LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Recent agent events",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 20, "w": 24, "h": 9 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT created_at, role_name AS agent, event_type, session_id, task_id, payload FROM argo_public.v_agent_events ORDER BY created_at DESC LIMIT 100",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

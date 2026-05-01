@@ -1,0 +1,28 @@
+{{- if and .Values.postgresql.enabled .Values.argo.applySchema }}
+---
+# Bundles the ARGO schema and seed configuration into a ConfigMap consumed
+# during CNPG bootstrap (postInitApplicationSQLRefs). CNPG will execute the
+# SQL one statement at a time against the application database.
+#
+# The schema file ships with default seed rows for embedding_config and
+# system_agent_configs. The chart-specific bits (correct ollama service URL,
+# overridable embedding model + dimensions) are layered on top by 02-overrides.sql.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "argo-stack.fullname" . }}-argo-schema
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+data:
+  01-schema.sql: |-
+{{ .Files.Get "files/argo--0.1.sql" | indent 4 }}
+
+  02-overrides.sql: |-
+    -- argo-stack overrides applied after the base schema.
+    -- Re-point the seeded embedding_config row at the in-cluster Ollama service.
+    UPDATE argo_private.embedding_config
+       SET model_name = {{ .Values.argo.embedding.modelName | quote }},
+           dimensions = {{ .Values.argo.embedding.dimensions }},
+           endpoint   = {{ printf "http://%s:%d" (include "argo-stack.ollamaService" .) (int .Values.ollama.service.port) | quote }}
+     WHERE is_active = TRUE;
+{{- end }}

@@ -1,0 +1,32 @@
+{{- if and .Values.langflow.enabled .Values.langflow.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "argo-stack.langflowService" . }}
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+  {{- with .Values.langflow.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.langflow.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.langflow.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.langflow.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.langflow.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "argo-stack.langflowService" . }}
+                port:
+                  number: {{ .Values.langflow.service.port }}
+{{- end }}

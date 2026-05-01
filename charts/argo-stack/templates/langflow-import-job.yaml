@@ -1,0 +1,65 @@
+{{- if and .Values.langflow.enabled .Values.langflow.importFlows }}
+---
+# Imports the bundled starter flows via the Langflow API once Langflow is up.
+# Each call is idempotent because Langflow rejects duplicate flow names; we
+# tolerate the resulting 4xx so re-runs on upgrade succeed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "argo-stack.fullname" . }}-langflow-import
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "argo-stack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: langflow-import
+    spec:
+      serviceAccountName: {{ include "argo-stack.serviceAccountName" . }}
+      restartPolicy: OnFailure
+      containers:
+        - name: import
+          image: curlimages/curl:8.10.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              BASE="http://${LANGFLOW_HOST}:${LANGFLOW_PORT}"
+              echo "Waiting for Langflow at $BASE ..."
+              for i in $(seq 1 60); do
+                if curl -sf "$BASE/health" > /dev/null 2>&1; then
+                  echo "langflow ready"
+                  break
+                fi
+                sleep 5
+              done
+
+              for f in /flows/*.json; do
+                echo "Uploading $f ..."
+                # 200 = created, 4xx (likely conflict on duplicate name) = treat as success
+                code=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X POST "$BASE/api/v1/flows/upload/" \
+                  -F "file=@${f}" || true)
+                echo "  -> HTTP $code"
+              done
+              echo "import complete"
+          env:
+            - name: LANGFLOW_HOST
+              value: {{ include "argo-stack.langflowService" . | quote }}
+            - name: LANGFLOW_PORT
+              value: {{ .Values.langflow.service.port | quote }}
+          volumeMounts:
+            - name: flows
+              mountPath: /flows
+              readOnly: true
+      volumes:
+        - name: flows
+          configMap:
+            name: {{ include "argo-stack.fullname" . }}-langflow-flows
+{{- end }}

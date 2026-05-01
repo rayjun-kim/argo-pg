@@ -1,0 +1,139 @@
+{{- if .Values.ollama.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "argo-stack.ollamaService" . }}
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  type: {{ .Values.ollama.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.ollama.service.port }}
+      targetPort: 11434
+      protocol: TCP
+  selector:
+    {{- include "argo-stack.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "argo-stack.ollamaService" . }}-models
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.ollama.storage.size }}
+  {{- with .Values.ollama.storage.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "argo-stack.ollamaService" . }}
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ollama
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate    # PVC is RWO; rolling update would block on volume attach
+  selector:
+    matchLabels:
+      {{- include "argo-stack.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ollama
+  template:
+    metadata:
+      labels:
+        {{- include "argo-stack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ollama
+    spec:
+      {{- if .Values.ollama.gpu.enabled }}
+      {{- with .Values.ollama.gpu.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.ollama.gpu.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      initContainers:
+        # Pull configured models on first startup. Re-runs are cheap because
+        # `ollama pull` is a no-op when the model is already present.
+        - name: model-puller
+          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              # Start the daemon in the background so `ollama pull` can talk to it.
+              ollama serve &
+              SERVER_PID=$!
+              # Wait for daemon
+              for i in $(seq 1 30); do
+                if ollama list > /dev/null 2>&1; then break; fi
+                sleep 2
+              done
+              {{- range .Values.ollama.pullModels }}
+              echo "Pulling model: {{ . }}"
+              ollama pull {{ . | quote }}
+              {{- end }}
+              # Stop daemon cleanly so the main container can take over.
+              kill $SERVER_PID 2>/dev/null || true
+              wait $SERVER_PID 2>/dev/null || true
+              echo "models ready"
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      containers:
+        - name: ollama
+          image: "{{ .Values.ollama.image.repository }}:{{ .Values.ollama.image.tag }}"
+          imagePullPolicy: {{ .Values.ollama.image.pullPolicy }}
+          ports:
+            - containerPort: 11434
+              name: http
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            - name: OLLAMA_KEEP_ALIVE
+              value: "5m"
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: {{ .Values.ollama.resources.requests.cpu | quote }}
+              memory: {{ .Values.ollama.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.ollama.resources.limits.cpu | quote }}
+              memory: {{ .Values.ollama.resources.limits.memory | quote }}
+              {{- if .Values.ollama.gpu.enabled }}
+              nvidia.com/gpu: {{ .Values.ollama.gpu.count }}
+              {{- end }}
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ include "argo-stack.ollamaService" . }}-models
+{{- end }}

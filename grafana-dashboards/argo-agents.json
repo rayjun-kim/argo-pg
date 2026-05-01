@@ -1,0 +1,109 @@
+{
+  "title": "ARGO Agents",
+  "uid": "argo-agents",
+  "tags": ["argo", "agents"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "label": "PostgreSQL",
+        "query": "postgres"
+      },
+      {
+        "name": "agent",
+        "type": "query",
+        "label": "Agent",
+        "datasource": { "type": "postgres", "uid": "${datasource}" },
+        "query": "SELECT role_name FROM argo_private.agent_meta WHERE is_active ORDER BY role_name",
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": false, "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Agent inventory",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT am.role_name, am.display_name, ap.agent_role, lc.provider, lc.model_name, ap.max_steps, am.is_active FROM argo_private.agent_meta am JOIN argo_private.agent_profile_assignments apa ON apa.role_name = am.role_name JOIN argo_private.agent_profiles ap ON ap.profile_id = apa.profile_id JOIN argo_private.llm_configs lc ON lc.llm_config_id = apa.llm_config_id WHERE am.role_name = ANY (string_to_array('${agent:csv}', ',')) OR '${agent:csv}' = '$__all' ORDER BY am.role_name",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Tasks completed (24h)",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, count(*)::int AS value FROM argo_private.tasks t JOIN argo_private.agent_meta am ON am.agent_id = t.agent_id WHERE t.status = 'completed' AND t.updated_at > now() - interval '24 hours' AND (am.role_name = ANY (string_to_array('${agent:csv}', ',')) OR '${agent:csv}' = '$__all')",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Avg steps per task",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT now() AS time, COALESCE(AVG(steps),0)::float AS value FROM (SELECT t.task_id, COUNT(el.log_id) AS steps FROM argo_private.tasks t JOIN argo_private.agent_meta am ON am.agent_id = t.agent_id LEFT JOIN argo_private.execution_logs el ON el.task_id = t.task_id AND el.role = 'assistant' WHERE t.status = 'completed' AND t.updated_at > now() - interval '24 hours' AND (am.role_name = ANY (string_to_array('${agent:csv}', ',')) OR '${agent:csv}' = '$__all') GROUP BY t.task_id) s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tasks per agent over time",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 9 },
+      "targets": [
+        {
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', t.updated_at) AS time, am.role_name AS metric, count(*)::int AS value FROM argo_private.tasks t JOIN argo_private.agent_meta am ON am.agent_id = t.agent_id WHERE $__timeFilter(t.updated_at) AND t.status='completed' AND (am.role_name = ANY (string_to_array('${agent:csv}', ',')) OR '${agent:csv}' = '$__all') GROUP BY 1,2 ORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Tool grants per agent",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 17, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT am.role_name AS agent, t.name AS tool, t.tool_type, p.granted_at FROM argo_private.agent_tool_permissions p JOIN argo_private.agent_meta am ON am.agent_id = p.agent_id JOIN argo_private.tool_registry t ON t.tool_id = p.tool_id WHERE am.role_name = ANY (string_to_array('${agent:csv}', ',')) OR '${agent:csv}' = '$__all' ORDER BY am.role_name, t.name",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Recent failed tasks",
+      "datasource": { "type": "postgres", "uid": "${datasource}" },
+      "gridPos": { "x": 12, "y": 17, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "format": "table",
+          "rawSql": "SELECT t.task_id, am.role_name AS agent, t.input, t.output AS reason, t.updated_at FROM argo_private.tasks t JOIN argo_private.agent_meta am ON am.agent_id = t.agent_id WHERE t.status='failed' AND t.updated_at > now() - interval '7 days' AND (am.role_name = ANY (string_to_array('${agent:csv}', ',')) OR '${agent:csv}' = '$__all') ORDER BY t.updated_at DESC LIMIT 50",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

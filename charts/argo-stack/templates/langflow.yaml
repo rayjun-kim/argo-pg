@@ -1,0 +1,204 @@
+{{- if .Values.langflow.enabled }}
+---
+# Langflow custom components ConfigMap. Mounted under
+# /app/custom_components/argo/ so Langflow's component loader picks them up
+# (LANGFLOW_COMPONENTS_PATH=/app/custom_components, with `argo` as the
+# category folder).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "argo-stack.fullname" . }}-langflow-components
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+data:
+{{- range $path, $_ := .Files.Glob "files/components/*.py" }}
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+# Starter flow JSONs. Imported by the post-install langflow-import job.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "argo-stack.fullname" . }}-langflow-flows
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+data:
+{{- range $path, $_ := .Files.Glob "files/flows/*.json" }}
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "argo-stack.langflowService" . }}
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: langflow
+spec:
+  type: {{ .Values.langflow.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.langflow.service.port }}
+      targetPort: 7860
+      protocol: TCP
+  selector:
+    {{- include "argo-stack.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: langflow
+---
+{{- if .Values.langflow.storage.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "argo-stack.langflowService" . }}-data
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: langflow
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.langflow.storage.size }}
+  {{- with .Values.langflow.storage.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "argo-stack.langflowService" . }}
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/component: langflow
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "argo-stack.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: langflow
+  template:
+    metadata:
+      labels:
+        {{- include "argo-stack.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: langflow
+      annotations:
+        # Bounce the deployment when components change (so new code is picked up).
+        checksum/components: {{ include (print $.Template.BasePath "/langflow.yaml") . | sha256sum }}
+    spec:
+      initContainers:
+        # Lay out the custom components in the directory layout Langflow expects:
+        #   /app/custom_components/argo/{argo_*.py, _argo_db.py, __init__.py}
+        # ConfigMap mounts are read-only, so we copy into an emptyDir.
+        - name: setup-components
+          image: busybox:1.36
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              mkdir -p /workspace/argo
+              cp /raw/*.py /workspace/argo/
+              # __init__.py is required for the loader to recognize the package
+              if [ ! -f /workspace/argo/__init__.py ]; then
+                touch /workspace/argo/__init__.py
+              fi
+              echo "components staged:"
+              ls -la /workspace/argo/
+          volumeMounts:
+            - name: components-raw
+              mountPath: /raw
+            - name: components-staged
+              mountPath: /workspace
+      containers:
+        - name: langflow
+          image: "{{ .Values.langflow.image.repository }}:{{ .Values.langflow.image.tag }}"
+          imagePullPolicy: {{ .Values.langflow.image.pullPolicy }}
+          ports:
+            - containerPort: 7860
+              name: http
+          env:
+            - name: LANGFLOW_HOST
+              value: "0.0.0.0"
+            - name: LANGFLOW_PORT
+              value: "7860"
+            - name: LANGFLOW_COMPONENTS_PATH
+              value: /app/custom_components
+
+            # ARGO database connection — used by every ARGO component.
+            - name: ARGO_PG_HOST
+              value: {{ include "argo-stack.pgRwService" . | quote }}
+            - name: ARGO_PG_PORT
+              value: "5432"
+            - name: ARGO_PG_DB
+              value: {{ .Values.postgresql.initdb.database | quote }}
+            - name: ARGO_PG_USER
+              value: "argo_langflow"
+            - name: ARGO_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "argo-stack.fullname" . }}-argo-passwords
+                  key: ARGO_LANGFLOW_PASSWORD
+
+            {{- if .Values.langflow.auth.enabled }}
+            - name: LANGFLOW_AUTO_LOGIN
+              value: "false"
+            - name: LANGFLOW_SUPERUSER
+              value: {{ .Values.langflow.auth.superuser | quote }}
+            - name: LANGFLOW_SUPERUSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.langflow.auth.existingSecret }}
+                  name: {{ .Values.langflow.auth.existingSecret }}
+                  key: superuser-password
+                  {{- else }}
+                  name: {{ include "argo-stack.fullname" . }}-langflow-auth
+                  key: superuser-password
+                  {{- end }}
+            {{- else }}
+            - name: LANGFLOW_AUTO_LOGIN
+              value: "true"
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 7860
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 7860
+            initialDelaySeconds: 90
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.langflow.resources | nindent 12 }}
+          volumeMounts:
+            - name: components-staged
+              mountPath: /app/custom_components
+            - name: flows
+              mountPath: /app/flows
+              readOnly: true
+            {{- if .Values.langflow.storage.enabled }}
+            - name: data
+              mountPath: /app/langflow-data
+            {{- end }}
+      volumes:
+        - name: components-raw
+          configMap:
+            name: {{ include "argo-stack.fullname" . }}-langflow-components
+        - name: components-staged
+          emptyDir: {}
+        - name: flows
+          configMap:
+            name: {{ include "argo-stack.fullname" . }}-langflow-flows
+        {{- if .Values.langflow.storage.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "argo-stack.langflowService" . }}-data
+        {{- end }}
+{{- end }}

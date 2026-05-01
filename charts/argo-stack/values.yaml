@@ -1,0 +1,202 @@
+# =============================================================================
+# argo-stack values.yaml
+#
+# Default install runs entirely on CPU and provisions a single-instance
+# PostgreSQL cluster, Ollama, and Langflow. Override these values for HA,
+# GPU, custom models, or external Postgres.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Global naming and labels
+# -----------------------------------------------------------------------------
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
+# CloudNativePG operator (subchart)
+#
+# Deploys the cluster-scoped operator that watches Cluster resources.
+# Disable this if your cluster already runs cnpg-operator.
+# -----------------------------------------------------------------------------
+cloudnative-pg:
+  enabled: true
+
+# -----------------------------------------------------------------------------
+# ARGO PostgreSQL Cluster (a Cluster resource managed by CNPG)
+# -----------------------------------------------------------------------------
+postgresql:
+  enabled: true
+
+  # The Cluster resource name. Becomes -rw / -ro / -r service prefix.
+  clusterName: argo-pg
+
+  # Number of Postgres instances (1 = single, 2+ = HA with streaming replication)
+  instances: 1
+
+  # CNPG image with pgvector preinstalled.
+  # ghcr.io/cloudnative-pg/postgresql ships pgvector since 17.x.
+  imageName: "ghcr.io/cloudnative-pg/postgresql:17.2"
+
+  # Persistent storage
+  storage:
+    size: 10Gi
+    storageClass: ""   # "" => use default StorageClass
+
+  # initdb configuration. Database name and app user.
+  initdb:
+    database: argo
+    owner: argo_app
+    encoding: UTF8
+    localeCollate: C
+    localeCType: C
+    dataChecksums: true
+
+  # Postgres tuning (passed to postgresql.parameters in Cluster spec)
+  parameters:
+    shared_buffers: "256MB"
+    max_connections: "200"
+
+  # Resource requests/limits for each instance
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+
+  # Enable pg_hba additions if needed (defaults are fine for in-cluster usage)
+  pg_hba: []
+
+  # Optional monitoring (PodMonitor + metrics endpoint)
+  monitoring:
+    enabled: false
+
+# -----------------------------------------------------------------------------
+# Ollama (LLM + embedding server)
+#
+# Runs CPU-only by default. To use GPU: set gpu.enabled=true and ensure your
+# nodes expose nvidia.com/gpu resources (e.g. via the NVIDIA device plugin).
+# -----------------------------------------------------------------------------
+ollama:
+  enabled: true
+
+  image:
+    repository: ollama/ollama
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 11434
+
+  storage:
+    size: 30Gi
+    storageClass: ""
+
+  # CPU baseline. Override resources / limits for larger models.
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
+  gpu:
+    enabled: false
+    # Number of GPUs to request per pod
+    count: 1
+    # Selector to pin the pod onto GPU nodes
+    nodeSelector: {}
+    # Tolerations for tainted GPU nodes
+    tolerations: []
+
+  # Models to pull on first startup. The init job runs `ollama pull` for each.
+  pullModels:
+    - "llama3.2"          # small chat model, ~2GB
+    - "nomic-embed-text"  # 768-dim embeddings, ~270MB
+
+  # Default chat model (referenced by sample agents in the seed data)
+  defaultChatModel: "llama3.2"
+
+# -----------------------------------------------------------------------------
+# Langflow
+#
+# Custom ARGO components and starter flows are mounted via ConfigMaps so the
+# upstream Langflow image can be used without rebuilding.
+# -----------------------------------------------------------------------------
+langflow:
+  enabled: true
+
+  image:
+    repository: langflowai/langflow
+    tag: "latest"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 7860
+
+  # Set to LoadBalancer or NodePort to expose externally, or enable ingress.
+  ingress:
+    enabled: false
+    className: ""
+    host: argo.local
+    path: /
+    annotations: {}
+    tls: []
+
+  storage:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "1Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
+  # Auto-import the bundled flows on first startup.
+  importFlows: true
+
+  # Optional auth. If set, Langflow runs with login enabled.
+  auth:
+    enabled: false
+    superuser: admin
+    # Use existingSecret OR superuserPassword (not both)
+    existingSecret: ""
+    superuserPassword: ""
+
+# -----------------------------------------------------------------------------
+# ARGO bootstrap configuration
+# -----------------------------------------------------------------------------
+argo:
+  # Apply the schema during PG initdb. Disable only when re-using an existing DB.
+  applySchema: true
+
+  # Embedding model defaults written into argo_private.embedding_config.
+  # Adjust if you change ollama.pullModels.
+  embedding:
+    modelName: "nomic-embed-text"
+    dimensions: 768
+
+  # Seed example agents and tools after schema install.
+  seedExamples: true
+
+  # Passwords are auto-generated when blank. Set explicitly for reproducible
+  # installs (or supply via --set or a values file with restricted permissions).
+  passwords:
+    operator: ""    # for argo_operator role (used by Helm post-install jobs)
+    langflow: ""    # for argo_langflow role (used by Langflow connection)
+
+# -----------------------------------------------------------------------------
+# Service accounts and RBAC
+# -----------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

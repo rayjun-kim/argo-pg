@@ -1,0 +1,38 @@
+apiVersion: v2
+name: argo-stack
+description: |
+  ARGO — DBaaCP-style agent framework on Kubernetes.
+
+  Deploys a complete agent stack in a single helm install:
+    - PostgreSQL via CloudNativePG (with the ARGO schema bootstrapped)
+    - Ollama (CPU by default; GPU via values.yaml toggle)
+    - Langflow (with ARGO custom components and starter flows pre-loaded)
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+
+keywords:
+  - argo
+  - agents
+  - llm
+  - postgresql
+  - cloudnative-pg
+  - langflow
+  - ollama
+  - dbaacp
+
+home: https://github.com/Rayjun0525/argo-stack
+sources:
+  - https://github.com/Rayjun0525/argo-stack
+
+maintainers:
+  - name: ARGO Contributors
+
+dependencies:
+  - name: cloudnative-pg
+    version: "0.22.x"
+    repository: https://cloudnative-pg.github.io/charts
+    condition: cloudnative-pg.enabled
+    alias: cnpg

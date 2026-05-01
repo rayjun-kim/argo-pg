@@ -1,0 +1,65 @@
+{{- $fullName := include "argo-stack.fullname" . -}}
+{{- $ns := .Release.Namespace -}}
+
+==========================================================================
+ARGO Stack installed successfully.
+==========================================================================
+
+PostgreSQL (CNPG):
+  Cluster:  {{ include "argo-stack.pgClusterName" . }}
+  RW host:  {{ include "argo-stack.pgRwService" . }}.{{ $ns }}.svc:5432
+  Database: {{ .Values.postgresql.initdb.database }}
+
+  Privileged role passwords (kept across upgrades):
+    kubectl -n {{ $ns }} get secret {{ $fullName }}-argo-passwords \
+      -o jsonpath='{.data.ARGO_OPERATOR_PASSWORD}' | base64 -d
+
+{{- if .Values.ollama.enabled }}
+
+Ollama:
+  http://{{ include "argo-stack.ollamaService" . }}.{{ $ns }}.svc:{{ .Values.ollama.service.port }}
+  Models pulled on first start:
+{{- range .Values.ollama.pullModels }}
+    - {{ . }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.langflow.enabled }}
+
+Langflow UI:
+  Service: {{ include "argo-stack.langflowService" . }}.{{ $ns }}.svc:{{ .Values.langflow.service.port }}
+
+  Quick local access:
+    kubectl -n {{ $ns }} port-forward svc/{{ include "argo-stack.langflowService" . }} {{ .Values.langflow.service.port }}:{{ .Values.langflow.service.port }}
+    open http://localhost:{{ .Values.langflow.service.port }}
+
+  {{- if .Values.langflow.auth.enabled }}
+  Login:
+    user:     {{ .Values.langflow.auth.superuser }}
+    password: kubectl -n {{ $ns }} get secret \
+      {{- if .Values.langflow.auth.existingSecret }} {{ .Values.langflow.auth.existingSecret }} {{- else }} {{ $fullName }}-langflow-auth {{- end }} \
+      -o jsonpath='{.data.superuser-password}' | base64 -d
+  {{- else }}
+  Auth: AUTO_LOGIN is enabled (no login required).
+  {{- end }}
+{{- end }}
+
+{{- if .Values.argo.seedExamples }}
+
+Sample data:
+  Agent:  sample_chat
+  Tool:   sample_search (MCP stub — replace mcp_server_url with a real endpoint)
+  Flows:  ARGO Single Agent, ARGO Multi Agent, ARGO Embedder
+{{- end }}
+
+Next steps:
+  1. Open Langflow and pick the "ARGO Single Agent" flow.
+  2. In the Ollama node, confirm the Model Name (default: {{ .Values.ollama.defaultChatModel }}).
+  3. Click Playground and send a message — the flow loops Next Step → Ollama → Submit Result.
+  4. Watch progress in PostgreSQL:
+       kubectl -n {{ $ns }} exec -it {{ include "argo-stack.pgClusterName" . }}-1 -- \
+         psql -U postgres -d {{ .Values.postgresql.initdb.database }} -c \
+         "SELECT * FROM argo_public.v_session_progress;"
+
+For more details, see the project README.
+==========================================================================

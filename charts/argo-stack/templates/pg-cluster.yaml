@@ -1,0 +1,58 @@
+{{- if .Values.postgresql.enabled }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "argo-stack.pgClusterName" . }}
+  labels:
+    {{- include "argo-stack.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgresql.instances }}
+  imageName: {{ .Values.postgresql.imageName | quote }}
+
+  # Required so the role-setup post-install Job can connect as postgres
+  # to ALTER the argo_operator / argo_langflow passwords. CNPG creates a
+  # generated `<cluster>-superuser` secret when this is true.
+  enableSuperuserAccess: true
+
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgresql.initdb.database | quote }}
+      owner:    {{ .Values.postgresql.initdb.owner    | quote }}
+      encoding: {{ .Values.postgresql.initdb.encoding | quote }}
+      localeCollate: {{ .Values.postgresql.initdb.localeCollate | quote }}
+      localeCType:   {{ .Values.postgresql.initdb.localeCType   | quote }}
+      dataChecksums: {{ .Values.postgresql.initdb.dataChecksums }}
+      {{- if .Values.argo.applySchema }}
+      postInitApplicationSQLRefs:
+        configMapRefs:
+          - name: {{ include "argo-stack.fullname" . }}-argo-schema
+            key: 01-schema.sql
+          - name: {{ include "argo-stack.fullname" . }}-argo-schema
+            key: 02-overrides.sql
+      {{- end }}
+
+  storage:
+    size: {{ .Values.postgresql.storage.size | quote }}
+    {{- with .Values.postgresql.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+
+  postgresql:
+    parameters:
+      {{- range $k, $v := .Values.postgresql.parameters }}
+      {{ $k }}: {{ $v | quote }}
+      {{- end }}
+    {{- with .Values.postgresql.pg_hba }}
+    pg_hba:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+
+  resources:
+    {{- toYaml .Values.postgresql.resources | nindent 4 }}
+
+  {{- if .Values.postgresql.monitoring.enabled }}
+  monitoring:
+    enablePodMonitor: true
+  {{- end }}
+{{- end }}
