@@ -21,8 +21,8 @@ data:
     -- argo-stack overrides applied after the base schema.
     -- Re-point the seeded embedding_config row at the in-cluster Ollama service.
     UPDATE argo_private.embedding_config
-       SET model_name = {{ .Values.argo.embedding.modelName | quote }},
+       SET model_name = '{{ .Values.argo.embedding.modelName }}',
            dimensions = {{ .Values.argo.embedding.dimensions }},
-           endpoint   = {{ printf "http://%s:%d" (include "argo-stack.ollamaService" .) (int .Values.ollama.service.port) | quote }}
+           endpoint   = '{{ printf "http://%s:%d" (include "argo-stack.ollamaService" .) (int .Values.ollama.service.port) }}'
      WHERE is_active = TRUE;
 {{- end }}
