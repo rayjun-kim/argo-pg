@@ -13,11 +13,40 @@ This repository ships a complete, helm-installable stack:
 - **Langflow** as the visual interface, with ARGO custom components and
   pre-built starter flows
 
-Single command:
+---
+
+## Quick start
+
+### 1. CNPG Operator 설치 (최초 1회)
+
+CloudNativePG Operator는 클러스터 전체에 하나만 설치되어야 합니다.
 
 ```bash
-helm repo add argo https://<your-org>.github.io/argo-stack
-helm install argo argo/argo-stack -n argo --create-namespace --wait
+helm repo add cnpg https://cloudnative-pg.github.io/charts
+helm repo update
+helm install cnpg cnpg/cloudnative-pg \
+  --namespace cnpg-system \
+  --create-namespace \
+  --wait
+```
+
+### 2. ARGO 설치
+
+```bash
+helm repo add argo https://rayjun-kim.github.io/argo-pg
+helm repo update
+helm install argo argo/argo-stack \
+  --namespace argo \
+  --create-namespace \
+  --set cloudnative-pg.enabled=false \
+  --wait
+```
+
+### 3. Langflow 접속
+
+```bash
+kubectl -n argo port-forward svc/argo-argo-stack-langflow 7860:7860
+# 브라우저에서 http://localhost:7860 열기
 ```
 
 ---
@@ -25,13 +54,13 @@ helm install argo argo/argo-stack -n argo --create-namespace --wait
 ## Repository layout
 
 ```
-argo-stack/
-├── sql/argo--0.1.sql         The full ARGO schema (extension-style, single file)
+argo-pg/
+├── sql/argo--0.1.sql         The full ARGO schema (single file)
 ├── langflow-components/      Six custom Langflow nodes:
 │                               ARGOEnqueue, ARGONextStep, ARGOSubmitResult,
 │                               ARGOSearchTools, ARGOToolRouter, ARGOEmbedder
 ├── langflow-flows/           Starter Flow JSONs (single / multi / embedder)
-├── charts/argo-stack/        The Helm chart (CNPG + Ollama + Langflow)
+├── charts/argo-stack/        The Helm chart (CNPG Cluster + Ollama + Langflow)
 ├── examples/                 Hand-runnable SQL examples for direct DB use
 ├── grafana-dashboards/       PostgreSQL data-source dashboards for monitoring
 ├── docs/                     Concept docs and architecture diagrams
@@ -46,17 +75,17 @@ ARGO has exactly two control-plane functions:
 
 ```
 fn_next_step(task_id, [query_embedding])
-   → {action: 'call_llm',     messages, llm_config, tools, memory}
-   | {action: 'wait_tasks',   pending_task_ids}
+   → {action: 'call_llm',      messages, llm_config, tools, memory}
+   | {action: 'wait_tasks',    pending_task_ids}
    | {action: 'wait_approval', approval_id}
-   | {action: 'done',         output}
+   | {action: 'done',          output}
 
 fn_submit_result(task_id, llm_response, is_final)
    → {action: 'continue'}
-   | {action: 'done',           output, need_embedding}
-   | {action: 'invoke_tool',    tool, args}
-   | {action: 'wait_tasks',     pending_task_ids}
-   | {action: 'wait_approval',  approval_id}
+   | {action: 'done',          output, need_embedding}
+   | {action: 'invoke_tool',   tool, args}
+   | {action: 'wait_tasks',    pending_task_ids}
+   | {action: 'wait_approval', approval_id}
 ```
 
 A worker — Langflow in this repo, but you could write one in any language —
@@ -88,8 +117,8 @@ multi-agent delegation, human approval) lives in SQL.
 | `sql_sandbox_allowlist`     | Views the SQL tool may read |
 | `system_agent_configs`      | Built-in compressor / embedder agents |
 
-Twelve `argo_public.*` views and 32 functions form the API. Three PG roles
-(`argo_operator`, `argo_agent_base`, `argo_langflow`, plus per-agent roles)
+Fourteen `argo_public.*` views and 32 functions form the API. Four PG roles
+(`argo_operator`, `argo_agent_base`, `argo_langflow`, `argo_sql_sandbox`, plus per-agent roles)
 isolate access.
 
 ---
@@ -100,18 +129,18 @@ Tools follow the MCP spec for `name`, `description`, and `input_schema`
 ([reference](https://modelcontextprotocol.io/specification/server/tools)).
 Beyond MCP, ARGO supports three additional `tool_type`s:
 
-| `tool_type` | Where it runs                       | Configured fields                   |
-|-------------|-------------------------------------|-------------------------------------|
-| `mcp`       | External MCP server (Langflow MCP)  | `mcp_server_url`, `mcp_server_name` |
-| `http`      | Generic REST endpoint               | `http_endpoint`, `http_method`, `http_headers` |
-| `custom`    | Inline Python / JS                  | `custom_code`, `runtime`            |
-| `sql`       | Inside the DB (SQL sandbox)         | (uses `sql_sandbox_allowlist`)      |
+| `tool_type` | Where it runs                      | Configured fields                              |
+|-------------|------------------------------------|------------------------------------------------|
+| `mcp`       | External MCP server (Langflow MCP) | `mcp_server_url`, `mcp_server_name`            |
+| `http`      | Generic REST endpoint              | `http_endpoint`, `http_method`, `http_headers` |
+| `custom`    | Inline Python / JS                 | `custom_code`, `runtime`                       |
+| `sql`       | Inside the DB (SQL sandbox)        | (uses `sql_sandbox_allowlist`)                 |
 
-The semantic search side: each tool's `description` is embedded by the
-embedder flow into `description_embedding`, and `fn_search_tools` does
-cosine-similarity search filtered by `agent_tool_permissions` and the
-active `embedding_dims`. Rotating embedding models doesn't break anything —
-mismatched dims are filtered out, and re-embedding catches up.
+Tool descriptions are embedded by the embedder flow into `description_embedding`
+via pgvector, and `fn_search_tools` does cosine-similarity search filtered by
+`agent_tool_permissions` and the active `embedding_dims`. Rotating embedding
+models doesn't break anything — mismatched dims are filtered out, and
+re-embedding catches up.
 
 ---
 
@@ -135,10 +164,6 @@ When the executor finishes, ARGO:
 2. Flips the parent task back to `pending` (if no other dependencies).
 3. Notifies via `pg_notify('argo_task_ready', ...)`.
 
-The orchestrator's next `fn_next_step` call sees the result through
-`fn_build_messages`, which concatenates execution logs + delivered
-agent messages + current step.
-
 ---
 
 ## Embedding rotation
@@ -151,17 +176,16 @@ SELECT argo_public.rotate_embedding_model(
 );
 ```
 
-Existing rows are NOT cleared. They're simply ignored by `fn_search_*`
-because their `embedding_dims` no longer match the active config. Run the
-ARGO Embedder flow to rebuild them at your own pace.
+Existing rows are NOT cleared — they're ignored by `fn_search_*` because
+their `embedding_dims` no longer match the active config. Run the ARGO
+Embedder flow to rebuild them at your own pace.
 
 ---
 
 ## Helm chart configuration
 
 See [`charts/argo-stack/values.yaml`](charts/argo-stack/values.yaml) and
-[`charts/argo-stack/README.md`](charts/argo-stack/README.md) for the
-full reference.
+[`charts/argo-stack/README.md`](charts/argo-stack/README.md) for the full reference.
 
 Common overrides:
 
@@ -173,7 +197,7 @@ ollama:
     nodeSelector: {gpu: "true"}
 
 postgresql:
-  instances: 3                   # HA primary + 2 replicas
+  instances: 3                   # HA: primary + 2 replicas
 
 langflow:
   ingress:
@@ -183,17 +207,22 @@ langflow:
     enabled: true
 ```
 
+> **Note:** `cloudnative-pg.enabled` is `false` by default. CNPG Operator
+> must be installed separately (see Quick start above). This avoids ownership
+> conflicts when CNPG is already present in the cluster.
+
 ---
 
 ## Monitoring
 
-The Helm chart can connect Grafana to PostgreSQL as a data source.
-Pre-built dashboards in [`grafana-dashboards/`](grafana-dashboards/):
+Pre-built Grafana dashboards in [`grafana-dashboards/`](grafana-dashboards/):
 
 - `argo-overview.json` — Sessions, tasks, errors, tool latencies
 - `argo-agents.json` — Per-agent activity and step counts
 
-CNPG ships its own PG-infra dashboards; together they cover the full stack.
+Add your CNPG PostgreSQL RW service as a Grafana data source, then import
+the JSON files. CNPG ships its own PG-infra dashboards; together they cover
+the full stack.
 
 ---
 
@@ -201,16 +230,20 @@ CNPG ships its own PG-infra dashboards; together they cover the full stack.
 
 ```bash
 # Render the chart without installing
-helm template argo charts/argo-stack > /tmp/manifests.yaml
+helm template argo charts/argo-stack \
+  --set cloudnative-pg.enabled=false > /tmp/manifests.yaml
 
 # Static analysis
 helm lint charts/argo-stack
 
 # Dry-run install
-helm install argo charts/argo-stack -n argo --create-namespace --dry-run --debug
+helm install argo charts/argo-stack \
+  -n argo --create-namespace \
+  --set cloudnative-pg.enabled=false \
+  --dry-run --debug
 ```
 
-Building the Flow JSONs from sources (after editing components or layout):
+Building the Flow JSONs from sources:
 
 ```bash
 cd langflow-flows
@@ -221,11 +254,9 @@ python3 build_flows.py
 
 ## Project status
 
-This is a research-grade prototype that pairs a working agent control plane
-with a usable visual interface. Production hardening you'll want to layer on
-top: CNPG-I plugin packaging (so the schema becomes a first-class CNPG
-plugin), backup integration with Barman Cloud, fine-grained ingress auth,
-and PodSecurity standards.
+Research-grade prototype. Production hardening to layer on top: CNPG-I plugin
+packaging, Barman Cloud backup integration, fine-grained ingress auth, and
+PodSecurity standards.
 
 ---
 
