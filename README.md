@@ -26,7 +26,7 @@ helm install argo argo/argo-stack -n argo --create-namespace --wait
 
 ```
 argo-stack/
-├── sql/argo--2.0.sql         The full ARGO schema (extension-style, single file)
+├── sql/argo--0.1.sql         The full ARGO schema (extension-style, single file)
 ├── langflow-components/      Six custom Langflow nodes:
 │                               ARGOEnqueue, ARGONextStep, ARGOSubmitResult,
 │                               ARGOSearchTools, ARGOToolRouter, ARGOEmbedder
