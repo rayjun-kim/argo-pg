@@ -34,6 +34,11 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Add helm dependency repos
+        run: |
+          helm repo add cnpg https://cloudnative-pg.github.io/charts
+          helm repo update
+
       - name: Update chart dependencies
         run: |
           for d in charts/*/; do
@@ -67,6 +72,5 @@ jobs:
           charts_dir: charts
           mark_as_latest: true
           skip_existing: true
-          dependency_update: true
         env:
           CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
