@@ -1,62 +1,5 @@
 {{- if and .Values.postgresql.enabled .Values.argo.applySchema .Values.argo.seedExamples }}
 ---
-# Sample data: a chat agent, an MCP-style tool stub, and a flow_registry entry.
-# Runs once after the role-setup job. No-op on upgrade because all inserts use
-# ON CONFLICT DO NOTHING.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "argo-stack.fullname" . }}-argo-seed
-  labels:
-    {{- include "argo-stack.labels" . | nindent 4 }}
-data:
-  seed.sql: |
-    -- ----- Sample chat agent (idempotent) -----
-    DO $$
-    DECLARE
-        v_count INT;
-    BEGIN
-        SELECT COUNT(*) INTO v_count FROM argo_private.agent_meta WHERE role_name = 'sample_chat';
-        IF v_count = 0 THEN
-            PERFORM argo_public.create_agent(
-                'sample_chat',
-                jsonb_build_object(
-                    'name', 'Sample Chat',
-                    'agent_role', 'executor',
-                    'provider', 'ollama',
-                    'endpoint', :'OLLAMA_ENDPOINT',
-                    'model_name', :'CHAT_MODEL',
-                    'system_prompt', 'You are a helpful assistant. When you have a final answer, respond with JSON: {"action":"finish","final_answer":"..."}.'
-                )
-            );
-        END IF;
-    END $$;
-
-    -- ----- Sample MCP-style tool stub (idempotent) -----
-    INSERT INTO argo_private.tool_registry
-        (name, description, input_schema, tool_type, mcp_server_url, mcp_server_name)
-    VALUES
-        ('sample_search',
-         'Sample web search MCP tool. Replace mcp_server_url with a real MCP endpoint to make it functional.',
-         '{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}'::jsonb,
-         'mcp',
-         'http://example-mcp:8080/sse',
-         'example-mcp')
-    ON CONFLICT (name) DO NOTHING;
-
-    -- Grant the sample tool to the sample agent
-    INSERT INTO argo_private.agent_tool_permissions (agent_id, tool_id)
-    SELECT a.agent_id, t.tool_id
-    FROM argo_private.agent_meta a, argo_private.tool_registry t
-    WHERE a.role_name = 'sample_chat' AND t.name = 'sample_search'
-    ON CONFLICT DO NOTHING;
-
-    -- ----- Flow registry entries (point to the bundled starter flows) -----
-    INSERT INTO argo_private.flow_registry (flow_name, agent_id, webhook_url)
-    SELECT 'ARGO Single Agent', a.agent_id, NULL
-    FROM argo_private.agent_meta a WHERE a.role_name = 'sample_chat'
-    ON CONFLICT (flow_name) DO NOTHING;
----
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -85,14 +28,64 @@ spec:
             - |
               set -euo pipefail
               for i in $(seq 1 60); do
-                if pg_isready -h "$PGHOST" -p "$PGPORT" -U postgres > /dev/null 2>&1; then break; fi
+                if pg_isready -h "$PGHOST" -p "$PGPORT" -U postgres > /dev/null 2>&1; then
+                  echo "postgres ready"; break
+                fi
                 sleep 5
               done
+
               psql -v ON_ERROR_STOP=1 \
-                   -v "OLLAMA_ENDPOINT=$OLLAMA_ENDPOINT" \
-                   -v "CHAT_MODEL=$CHAT_MODEL" \
-                   -h "$PGHOST" -p "$PGPORT" -U postgres -d "$PGDATABASE" \
-                   -f /seed/seed.sql
+                   -h "$PGHOST" -p "$PGPORT" -U postgres -d "$PGDATABASE" << ENDSQL
+              DO \$\$
+              DECLARE
+                  v_count INT;
+              BEGIN
+                  SELECT COUNT(*) INTO v_count
+                  FROM argo_private.agent_meta
+                  WHERE role_name = 'sample_chat';
+
+                  IF v_count = 0 THEN
+                      PERFORM argo_public.create_agent(
+                          'sample_chat',
+                          jsonb_build_object(
+                              'name',          'Sample Chat',
+                              'agent_role',    'executor',
+                              'provider',      'ollama',
+                              'endpoint',      '$OLLAMA_ENDPOINT',
+                              'model_name',    '$CHAT_MODEL',
+                              'system_prompt', 'You are a helpful assistant. When you have a final answer respond with JSON: {"action":"finish","final_answer":"..."}.'
+                          )
+                      );
+                      RAISE NOTICE 'sample_chat agent created.';
+                  ELSE
+                      RAISE NOTICE 'sample_chat already exists, skipping.';
+                  END IF;
+              END \$\$;
+
+              INSERT INTO argo_private.tool_registry
+                  (name, description, input_schema, tool_type, mcp_server_url, mcp_server_name)
+              VALUES
+                  ('sample_search',
+                   'Sample web search MCP tool. Replace mcp_server_url with a real MCP endpoint.',
+                   '{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}'::jsonb,
+                   'mcp',
+                   'http://example-mcp:8080/sse',
+                   'example-mcp')
+              ON CONFLICT (name) DO NOTHING;
+
+              INSERT INTO argo_private.agent_tool_permissions (agent_id, tool_id)
+              SELECT a.agent_id, t.tool_id
+              FROM argo_private.agent_meta a, argo_private.tool_registry t
+              WHERE a.role_name = 'sample_chat' AND t.name = 'sample_search'
+              ON CONFLICT DO NOTHING;
+
+              INSERT INTO argo_private.flow_registry (flow_name, agent_id, webhook_url)
+              SELECT 'ARGO Single Agent', a.agent_id, NULL
+              FROM argo_private.agent_meta a
+              WHERE a.role_name = 'sample_chat'
+              ON CONFLICT (flow_name) DO NOTHING;
+              ENDSQL
+
               echo "seed complete"
           env:
             - name: PGHOST
@@ -110,11 +103,4 @@ spec:
               value: {{ printf "http://%s:%d" (include "argo-stack.ollamaService" .) (int .Values.ollama.service.port) | quote }}
             - name: CHAT_MODEL
               value: {{ .Values.ollama.defaultChatModel | quote }}
-          volumeMounts:
-            - name: seed
-              mountPath: /seed
-      volumes:
-        - name: seed
-          configMap:
-            name: {{ include "argo-stack.fullname" . }}-argo-seed
 {{- end }}
