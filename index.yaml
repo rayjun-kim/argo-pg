@@ -3,6 +3,40 @@ entries:
   argo-stack:
   - apiVersion: v2
     appVersion: 0.1.0
+    created: "2026-05-01T01:56:00.153128704Z"
+    dependencies:
+    - alias: cnpg
+      condition: cloudnative-pg.enabled
+      name: cloudnative-pg
+      repository: https://cloudnative-pg.github.io/charts
+      version: 0.22.x
+    description: 'ARGO — DBaaCP-style agent framework on Kubernetes.  Deploys a complete
+      agent stack in a single helm install:   - PostgreSQL via CloudNativePG (with
+      the ARGO schema bootstrapped)   - Ollama (CPU by default; GPU via values.yaml
+      toggle)   - Langflow (with ARGO custom components and starter flows pre-loaded) '
+    digest: 9afb4becafc7e37e38ffb189df535e43b77d2f3e1e62d6401f64c86a5d7a68d9
+    home: https://github.com/Rayjun0525/argo-stack
+    keywords:
+    - argo
+    - agents
+    - llm
+    - postgresql
+    - cloudnative-pg
+    - langflow
+    - ollama
+    - dbaacp
+    kubeVersion: '>=1.27.0-0'
+    maintainers:
+    - name: ARGO Contributors
+    name: argo-stack
+    sources:
+    - https://github.com/Rayjun0525/argo-stack
+    type: application
+    urls:
+    - https://github.com/rayjun-kim/argo-pg/releases/download/argo-stack-0.1.2/argo-stack-0.1.2.tgz
+    version: 0.1.2
+  - apiVersion: v2
+    appVersion: 0.1.0
     created: "2026-05-01T01:25:21.878891628Z"
     dependencies:
     - alias: cnpg
@@ -35,4 +69,4 @@ entries:
     urls:
     - https://github.com/rayjun-kim/argo-pg/releases/download/argo-stack-0.1.0/argo-stack-0.1.0.tgz
     version: 0.1.0
-generated: "2026-05-01T01:25:21.878901506Z"
+generated: "2026-05-01T01:56:00.153141544Z"
