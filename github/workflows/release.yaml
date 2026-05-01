@@ -1,0 +1,74 @@
+name: Release Helm Chart
+
+# Publishes the Helm chart at /charts/argo-stack to a GitHub Pages branch
+# whenever the chart contents change on `main`. End users then add the
+# Pages URL as a Helm repo.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/**'
+      - '.github/workflows/release.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to push to the gh-pages branch
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.1
+
+      - name: Configure Git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update chart dependencies
+        run: |
+          for d in charts/*/; do
+            if [ -f "$d/Chart.yaml" ]; then
+              echo "Updating dependencies for $d"
+              helm dependency update "$d"
+            fi
+          done
+
+      - name: Lint charts
+        run: |
+          for d in charts/*/; do
+            if [ -f "$d/Chart.yaml" ]; then
+              echo "Linting $d"
+              helm lint "$d"
+            fi
+          done
+
+      # Render the chart with default values to make sure templates produce
+      # valid YAML. Catches issues that lint misses (missing helpers, bad
+      # indent, etc.).
+      - name: Render charts
+        run: |
+          for d in charts/*/; do
+            if [ -f "$d/Chart.yaml" ]; then
+              echo "Rendering $d"
+              helm template _test "$d" > /dev/null
+            fi
+          done
+
+      - name: Publish to chart-releaser
+        uses: helm/chart-releaser-action@v1.6.0
+        with:
+          charts_dir: charts
+          mark_as_latest: true
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}

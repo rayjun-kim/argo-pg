@@ -1,0 +1,137 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  sql-test:
+    name: ARGO schema bootstraps cleanly
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: argo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply argo--0.1.sql
+        env:
+          PGPASSWORD: test
+        run: |
+          psql -h localhost -U postgres -d argo_test -v ON_ERROR_STOP=1 \
+               -f sql/argo--0.1.sql
+
+      - name: Verify objects
+        env:
+          PGPASSWORD: test
+        run: |
+          psql -h localhost -U postgres -d argo_test -At <<'SQL'
+            -- Expected counts must match the README table
+            SELECT count(*) >= 19 FROM pg_tables  WHERE schemaname IN ('argo_private','argo_public');
+            SELECT count(*) >= 12 FROM pg_views   WHERE schemaname IN ('argo_private','argo_public');
+            SELECT count(*) >= 25 FROM pg_proc p
+              JOIN pg_namespace n ON p.pronamespace = n.oid
+              WHERE n.nspname IN ('argo_private','argo_public');
+          SQL
+
+      - name: Smoke test create_agent + fn_next_step
+        env:
+          PGPASSWORD: test
+        run: |
+          psql -h localhost -U postgres -d argo_test -v ON_ERROR_STOP=1 <<'SQL'
+            SELECT argo_public.create_agent('ci_agent', '{
+              "name":"CI", "agent_role":"executor",
+              "provider":"ollama","model_name":"llama3.2",
+              "endpoint":"http://example:11434"
+            }'::jsonb);
+
+            SELECT argo_public.run_agent('ci_agent','hello world') AS info \gset
+
+            SELECT argo_public.fn_next_step(
+              ((:'info')::jsonb->>'task_id')::int
+            )::text;
+
+            SELECT argo_public.fn_submit_result(
+              ((:'info')::jsonb->>'task_id')::int,
+              '{"action":"finish","final_answer":"ok"}'
+            )::text;
+
+            -- Cleanup
+            SELECT argo_public.drop_agent('ci_agent');
+          SQL
+
+  components-test:
+    name: Langflow components compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile each component
+        run: |
+          for f in langflow-components/*.py; do
+            python3 -m py_compile "$f"
+          done
+
+  flow-test:
+    name: Flow JSONs build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build flows
+        run: |
+          cd langflow-flows
+          python3 build_flows.py
+          for f in *.json; do
+            python3 -c "import json; json.load(open('$f'))"
+          done
+
+  helm-lint:
+    name: helm lint and template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.1
+      - name: Sync chart files from repo root
+        # Keep chart-internal copies (files/argo--0.1.sql, files/components/,
+        # files/flows/) in sync with the canonical sources at the repo root.
+        run: |
+          set -e
+          cp sql/argo--0.1.sql charts/argo-stack/files/argo--0.1.sql
+          rm -rf charts/argo-stack/files/components
+          mkdir -p charts/argo-stack/files/components
+          cp langflow-components/*.py charts/argo-stack/files/components/
+          rm -rf charts/argo-stack/files/flows
+          mkdir -p charts/argo-stack/files/flows
+          cp langflow-flows/*.json charts/argo-stack/files/flows/
+      - name: helm dependency update
+        run: helm dependency update charts/argo-stack
+      - name: helm lint
+        run: helm lint charts/argo-stack
+      - name: helm template
+        run: helm template argo charts/argo-stack -n argo > /tmp/manifests.yaml
+      - name: Validate rendered YAML
+        run: |
+          python3 - <<'PY'
+          import yaml, sys
+          docs = list(yaml.safe_load_all(open('/tmp/manifests.yaml')))
+          docs = [d for d in docs if d]
+          print(f"rendered {len(docs)} documents")
+          PY
