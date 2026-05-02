@@ -38,7 +38,7 @@ spec:
                 sleep 5
               done
 
-              # Get auth token (works for both AUTO_LOGIN and auth-enabled modes)
+              # Get auth token
               echo "Getting auth token..."
               TOKEN=$(curl -s -X POST "$BASE/api/v1/login" \
                 -H "Content-Type: application/x-www-form-urlencoded" \
@@ -47,7 +47,6 @@ spec:
                 | cut -d'"' -f4)
 
               if [ -z "$TOKEN" ]; then
-                # Try auto_login endpoint (older Langflow versions)
                 TOKEN=$(curl -s "$BASE/api/v1/auto_login" \
                   | grep -o '"access_token":"[^"]*"' \
                   | cut -d'"' -f4)
@@ -61,9 +60,30 @@ spec:
                 AUTH_HEADER="Authorization: Bearer $TOKEN"
               fi
 
-              # Upload flows
+              # Fetch existing flow names to avoid duplicates
+              echo "Fetching existing flows..."
+              if [ -n "$AUTH_HEADER" ]; then
+                EXISTING=$(curl -s "$BASE/api/v1/flows/?page=1&size=100" \
+                  -H "$AUTH_HEADER" \
+                  | grep -o '"name":"[^"]*"' \
+                  | cut -d'"' -f4 || true)
+              else
+                EXISTING=$(curl -s "$BASE/api/v1/flows/?page=1&size=100" \
+                  | grep -o '"name":"[^"]*"' \
+                  | cut -d'"' -f4 || true)
+              fi
+
+              # Upload each flow only if its name doesn't already exist
               for f in /flows/*.json; do
-                echo "Uploading $f..."
+                # Extract flow name from JSON
+                FLOW_NAME=$(grep -o '"name":"[^"]*"' "$f" | head -1 | cut -d'"' -f4)
+
+                if echo "$EXISTING" | grep -qF "$FLOW_NAME"; then
+                  echo "  Skipping '$FLOW_NAME' (already exists)"
+                  continue
+                fi
+
+                echo "Uploading '$FLOW_NAME'..."
                 if [ -n "$AUTH_HEADER" ]; then
                   code=$(curl -s -o /dev/null -w "%{http_code}" \
                     -X POST "$BASE/api/v1/flows/upload/" \
