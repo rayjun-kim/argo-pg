@@ -3,13 +3,14 @@
 # argo-install.sh — ARGO Stack installer / uninstaller
 #
 # Usage:
-#   ./argo-install.sh [COMMAND] [OPTIONS]
+#   ./argo-install.sh [COMMAND] [FLAGS]
 #
 # Commands:
-#   install     Install ARGO stack (default)
-#   uninstall   Remove ARGO stack and CNPG operator
-#   status      Show current installation status
-#   help        Show this help message
+#   install              Install CNPG (if not present) + ARGO stack
+#   uninstall            Remove ARGO stack only (CNPG and CRDs untouched)
+#   uninstall --all      Remove ARGO + CNPG operator + all CRDs
+#   status               Show current installation status
+#   help                 Show this help message
 # =============================================================================
 
 set -euo pipefail
@@ -39,36 +40,41 @@ step()  { echo -e "\n${BOLD}${BLUE}==> $*${NC}"; }
 usage() {
     cat << EOF
 
-${BOLD}ARGO Stack Installer${NC}
+ARGO Stack Installer
 DBaaCP Agent Framework on Kubernetes
 
-${BOLD}Usage:${NC}
-  $(basename "$0") [COMMAND]
+Usage:
+  $(basename "$0") [COMMAND] [FLAGS]
 
-${BOLD}Commands:${NC}
-  install     Install CNPG Operator + ARGO stack (default)
-  uninstall   Remove ARGO stack, CNPG operator, and all related resources
-  status      Show current installation status
-  help        Show this help message
+Commands:
+  install              Install ARGO stack
+                       (installs CNPG automatically if not already present)
+  uninstall            Remove ARGO stack only
+                       (CNPG operator and CRDs are left untouched)
+  uninstall --all      Remove ARGO + CNPG operator + all CNPG CRDs
+                       (use only when no other workloads depend on CNPG)
+  status               Show current installation status
+  help                 Show this help message
 
-${BOLD}Examples:${NC}
-  $(basename "$0")                  # Install (default)
-  $(basename "$0") install          # Install
-  $(basename "$0") uninstall        # Remove everything
-  $(basename "$0") status           # Check current status
+Examples:
+  $(basename "$0") install            # Install everything
+  $(basename "$0") uninstall          # Remove ARGO only (safe for shared clusters)
+  $(basename "$0") uninstall --all    # Remove everything including CNPG
+  $(basename "$0") status             # Check current status
 
-${BOLD}What gets installed:${NC}
-  - CloudNativePG Operator      (cnpg-system namespace)
+What gets installed:
+  - CloudNativePG Operator      (cnpg-system, skipped if already installed)
   - PostgreSQL + ARGO schema    (argo namespace)
   - Ollama (gemma4:e2b + nomic-embed-text)
   - Langflow with ARGO components and starter flows
 
-${BOLD}Requirements:${NC}
-  - Kubernetes cluster (kubectl configured)
+Requirements:
+  - Kubernetes cluster with kubectl configured
   - Helm 3.x
   - Cluster-admin permissions
+  - Storage: ~40GB (30GB models + 10GB PostgreSQL)
 
-${BOLD}After install:${NC}
+After install:
   kubectl -n argo port-forward svc/argo-argo-stack-langflow 7860:7860
   open http://localhost:7860
 
@@ -76,24 +82,21 @@ EOF
 }
 
 # =============================================================================
-# Prerequisites check
+# Prerequisites
 # =============================================================================
 check_prerequisites() {
     step "Checking prerequisites"
 
-    # kubectl
     if ! command -v kubectl > /dev/null 2>&1; then
         error "kubectl not found. Install: https://kubernetes.io/docs/tasks/tools/"
     fi
     info "kubectl: $(kubectl version --client --short 2>/dev/null | head -1)"
 
-    # helm
     if ! command -v helm > /dev/null 2>&1; then
         error "helm not found. Install: https://helm.sh/docs/intro/install/"
     fi
     info "helm: $(helm version --short 2>/dev/null)"
 
-    # Kubernetes cluster connectivity
     if ! kubectl cluster-info > /dev/null 2>&1; then
         error "Cannot connect to Kubernetes cluster.
   Check: kubectl config current-context
@@ -104,7 +107,6 @@ check_prerequisites() {
     context=$(kubectl config current-context 2>/dev/null || echo "unknown")
     info "Cluster context: ${context}"
 
-    # Node availability
     local node_count
     node_count=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
     if [ "$node_count" -eq 0 ]; then
@@ -112,7 +114,6 @@ check_prerequisites() {
     fi
     info "Cluster nodes: ${node_count}"
 
-    # Permissions (soft check)
     if ! kubectl auth can-i '*' '*' --all-namespaces > /dev/null 2>&1; then
         warn "Could not verify cluster-admin permissions. Install may fail if permissions are insufficient."
     else
@@ -123,10 +124,25 @@ check_prerequisites() {
 }
 
 # =============================================================================
-# Shared cleanup logic
+# CNPG availability check
 # =============================================================================
-do_cleanup() {
-    # Remove kept secret first
+cnpg_is_installed() {
+    # Returns 0 (true) if CNPG operator is already running in the cluster
+    kubectl get deployment -n "$CNPG_NAMESPACE" \
+        -l app.kubernetes.io/name=cloudnative-pg \
+        --no-headers 2>/dev/null | grep -q .
+}
+
+cnpg_crd_exists() {
+    kubectl get crd clusters.postgresql.cnpg.io > /dev/null 2>&1
+}
+
+# =============================================================================
+# Remove ARGO only
+# =============================================================================
+remove_argo_only() {
+    step "Removing ARGO stack (CNPG and CRDs will not be touched)"
+
     kubectl delete secret ${ARGO_RELEASE}-argo-stack-argo-passwords \
         -n "$ARGO_NAMESPACE" 2>/dev/null && \
         info "Removed Secret: argo-passwords." || true
@@ -134,11 +150,30 @@ do_cleanup() {
     helm uninstall "$ARGO_RELEASE" -n "$ARGO_NAMESPACE" --no-hooks 2>/dev/null && \
         info "Removed ARGO release." || true
 
-    helm uninstall "$CNPG_RELEASE" -n "$CNPG_NAMESPACE" --no-hooks 2>/dev/null && \
-        info "Removed CNPG release." || true
-
     kubectl delete namespace "$ARGO_NAMESPACE" --force --grace-period=0 2>/dev/null && \
         info "Deleted namespace: ${ARGO_NAMESPACE}" || true
+
+    info "Waiting for namespace to terminate..."
+    for i in $(seq 1 30); do
+        if ! kubectl get namespace "$ARGO_NAMESPACE" > /dev/null 2>&1; then
+            break
+        fi
+        echo -n "."
+        sleep 2
+    done
+    echo ""
+
+    info "ARGO removed. CNPG operator and CRDs are intact."
+}
+
+# =============================================================================
+# Remove CNPG + CRDs
+# =============================================================================
+remove_cnpg() {
+    step "Removing CNPG Operator and CRDs"
+
+    helm uninstall "$CNPG_RELEASE" -n "$CNPG_NAMESPACE" --no-hooks 2>/dev/null && \
+        info "Removed CNPG release." || true
 
     kubectl delete namespace "$CNPG_NAMESPACE" --force --grace-period=0 2>/dev/null && \
         info "Deleted namespace: ${CNPG_NAMESPACE}" || true
@@ -159,31 +194,40 @@ do_cleanup() {
             info "  Deleted CRD: ${crd}" || true
     done
 
-    info "Waiting for namespaces to terminate..."
-    for ns in "$ARGO_NAMESPACE" "$CNPG_NAMESPACE"; do
-        for i in $(seq 1 30); do
-            if ! kubectl get namespace "$ns" > /dev/null 2>&1; then
-                break
-            fi
-            echo -n "."
-            sleep 2
-        done
-        echo ""
+    info "Waiting for namespace to terminate..."
+    for i in $(seq 1 30); do
+        if ! kubectl get namespace "$CNPG_NAMESPACE" > /dev/null 2>&1; then
+            break
+        fi
+        echo -n "."
+        sleep 2
     done
+    echo ""
 }
 
 # =============================================================================
 # Uninstall
 # =============================================================================
 do_uninstall() {
-    step "Uninstalling ARGO stack"
+    local remove_all="${1:-}"
 
-    echo ""
-    warn "This will remove ALL ARGO resources including:"
-    echo "  - Helm releases: ${ARGO_RELEASE} (${ARGO_NAMESPACE}), ${CNPG_RELEASE} (${CNPG_NAMESPACE})"
-    echo "  - Namespaces and all resources within them"
-    echo "  - All CNPG CRDs"
-    echo "  - All PVCs (PostgreSQL data, Ollama models, Langflow data)"
+    if [ "$remove_all" = "--all" ]; then
+        echo ""
+        warn "This will remove ALL ARGO and CNPG resources including:"
+        echo "  - ARGO namespace and all its resources"
+        echo "  - CNPG Operator (${CNPG_NAMESPACE} namespace)"
+        echo "  - All CNPG CRDs (affects ALL clusters using CNPG)"
+        echo ""
+        warn "Only use --all when no other workloads in this cluster depend on CNPG."
+    else
+        echo ""
+        warn "This will remove ARGO resources:"
+        echo "  - Helm release '${ARGO_RELEASE}' in namespace '${ARGO_NAMESPACE}'"
+        echo "  - All PVCs in the argo namespace (PostgreSQL data, Ollama models, Langflow data)"
+        echo ""
+        info "CNPG Operator and CRDs will NOT be touched."
+    fi
+
     echo ""
     read -r -p "Are you sure? [y/N] " confirm
     case "$confirm" in
@@ -191,7 +235,12 @@ do_uninstall() {
         *) info "Aborted."; exit 0 ;;
     esac
 
-    do_cleanup
+    remove_argo_only
+
+    if [ "$remove_all" = "--all" ]; then
+        remove_cnpg
+    fi
+
     info "Uninstall complete."
 }
 
@@ -207,16 +256,25 @@ do_status() {
     helm list -n "$CNPG_NAMESPACE" 2>/dev/null || echo "  (none in ${CNPG_NAMESPACE})"
 
     echo ""
-    echo -e "${BOLD}Pods:${NC}"
+    echo -e "${BOLD}Pods (argo):${NC}"
     kubectl get pods -n "$ARGO_NAMESPACE" 2>/dev/null || echo "  (namespace not found)"
 
     echo ""
-    echo -e "${BOLD}Jobs:${NC}"
+    echo -e "${BOLD}Jobs (argo):${NC}"
     kubectl get jobs -n "$ARGO_NAMESPACE" 2>/dev/null || echo "  (none)"
 
     echo ""
     echo -e "${BOLD}CNPG Cluster:${NC}"
     kubectl get cluster -n "$ARGO_NAMESPACE" 2>/dev/null || echo "  (none)"
+
+    echo ""
+    echo -e "${BOLD}CNPG Operator:${NC}"
+    if cnpg_is_installed; then
+        kubectl get deployment -n "$CNPG_NAMESPACE" \
+            -l app.kubernetes.io/name=cloudnative-pg 2>/dev/null
+    else
+        echo "  (not installed)"
+    fi
 
     echo ""
     echo -e "${BOLD}Model pull progress:${NC}"
@@ -231,9 +289,28 @@ do_status() {
 do_install() {
     step "Starting ARGO stack installation"
 
-    # Cleanup
-    step "Cleaning up existing installations"
-    do_cleanup
+    # Clean up existing ARGO installation only
+    step "Cleaning up existing ARGO installation"
+
+    kubectl delete secret ${ARGO_RELEASE}-argo-stack-argo-passwords \
+        -n "$ARGO_NAMESPACE" 2>/dev/null && \
+        info "Removed Secret: argo-passwords." || true
+
+    helm uninstall "$ARGO_RELEASE" -n "$ARGO_NAMESPACE" --no-hooks 2>/dev/null && \
+        info "Removed existing ARGO release." || true
+
+    kubectl delete namespace "$ARGO_NAMESPACE" --force --grace-period=0 2>/dev/null && \
+        info "Deleted namespace: ${ARGO_NAMESPACE}" || true
+
+    info "Waiting for namespace to terminate..."
+    for i in $(seq 1 30); do
+        if ! kubectl get namespace "$ARGO_NAMESPACE" > /dev/null 2>&1; then
+            break
+        fi
+        echo -n "."
+        sleep 2
+    done
+    echo ""
     info "Cleanup complete."
 
     # Helm repos
@@ -243,19 +320,25 @@ do_install() {
     helm repo update
     info "Helm repos updated."
 
-    # CNPG Operator
-    step "Installing CloudNativePG Operator"
-    helm install "$CNPG_RELEASE" cnpg/cloudnative-pg \
-        --namespace "$CNPG_NAMESPACE" \
-        --create-namespace \
-        --wait \
-        --timeout 5m
+    # CNPG Operator — install only if not already present
+    step "Checking CloudNativePG Operator"
+    if cnpg_is_installed; then
+        info "CNPG Operator already installed — skipping."
+    else
+        info "CNPG Operator not found — installing..."
+        helm install "$CNPG_RELEASE" cnpg/cloudnative-pg \
+            --namespace "$CNPG_NAMESPACE" \
+            --create-namespace \
+            --wait \
+            --timeout 5m
+        info "CNPG Operator installed."
+    fi
 
-    info "Waiting for CNPG CRDs..."
+    info "Waiting for CNPG CRDs to be established..."
     kubectl wait --for=condition=established \
         crd/clusters.postgresql.cnpg.io \
         --timeout=60s
-    info "CNPG Operator ready."
+    info "CNPG ready."
 
     # ARGO stack
     step "Installing ARGO stack"
@@ -283,8 +366,8 @@ do_install() {
 
     info "Core components ready."
 
-    # Post-install hooks
-    step "Running post-install setup (roles, seed data, flow import)"
+    # Post-install hooks (roles, seed, langflow-import)
+    step "Running post-install setup"
     helm upgrade "$ARGO_RELEASE" argo/argo-stack \
         --namespace "$ARGO_NAMESPACE" \
         --set cloudnative-pg.enabled=false \
@@ -311,7 +394,7 @@ do_install() {
     echo "  kubectl -n ${ARGO_NAMESPACE} port-forward svc/${ARGO_RELEASE}-argo-stack-langflow 7860:7860"
     echo "  open http://localhost:7860"
     echo ""
-    echo "Check model download progress (runs in background):"
+    echo "Check model download progress (background):"
     echo "  kubectl logs -n ${ARGO_NAMESPACE} -l app.kubernetes.io/component=ollama-model-pull -f"
     echo ""
     echo "Check PostgreSQL:"
@@ -324,6 +407,7 @@ do_install() {
 # Main
 # =============================================================================
 COMMAND="${1:-install}"
+FLAG="${2:-}"
 
 case "$COMMAND" in
     install)
@@ -332,7 +416,7 @@ case "$COMMAND" in
         ;;
     uninstall)
         check_prerequisites
-        do_uninstall
+        do_uninstall "$FLAG"
         ;;
     status)
         check_prerequisites
