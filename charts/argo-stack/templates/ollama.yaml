@@ -120,8 +120,6 @@ metadata:
     {{- include "argo-stack.labels" . | nindent 4 }}
     app.kubernetes.io/component: ollama-model-pull
   annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "-10"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   # No backoffLimit cap — model pull should retry until success.
