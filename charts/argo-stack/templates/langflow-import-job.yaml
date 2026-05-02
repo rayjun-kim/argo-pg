@@ -1,8 +1,5 @@
 {{- if and .Values.langflow.enabled .Values.langflow.importFlows }}
 ---
-# Imports the bundled starter flows via the Langflow API once Langflow is up.
-# Each call is idempotent because Langflow rejects duplicate flow names; we
-# tolerate the resulting 4xx so re-runs on upgrade succeed.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -31,24 +28,56 @@ spec:
             - |
               set -e
               BASE="http://${LANGFLOW_HOST}:${LANGFLOW_PORT}"
-              echo "Waiting for Langflow at $BASE ..."
+
+              echo "Waiting for Langflow..."
               for i in $(seq 1 60); do
                 if curl -sf "$BASE/health" > /dev/null 2>&1; then
-                  echo "langflow ready"
+                  echo "Langflow ready."
                   break
                 fi
                 sleep 5
               done
 
+              # Get auth token (works for both AUTO_LOGIN and auth-enabled modes)
+              echo "Getting auth token..."
+              TOKEN=$(curl -s -X POST "$BASE/api/v1/login" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
+                -d "username=admin&password=admin" \
+                | grep -o '"access_token":"[^"]*"' \
+                | cut -d'"' -f4)
+
+              if [ -z "$TOKEN" ]; then
+                # Try auto_login endpoint (older Langflow versions)
+                TOKEN=$(curl -s "$BASE/api/v1/auto_login" \
+                  | grep -o '"access_token":"[^"]*"' \
+                  | cut -d'"' -f4)
+              fi
+
+              if [ -z "$TOKEN" ]; then
+                echo "Warning: Could not get token, trying without auth..."
+                AUTH_HEADER=""
+              else
+                echo "Token obtained."
+                AUTH_HEADER="Authorization: Bearer $TOKEN"
+              fi
+
+              # Upload flows
               for f in /flows/*.json; do
-                echo "Uploading $f ..."
-                # 200 = created, 4xx (likely conflict on duplicate name) = treat as success
-                code=$(curl -s -o /dev/null -w "%{http_code}" \
-                  -X POST "$BASE/api/v1/flows/upload/" \
-                  -F "file=@${f}" || true)
+                echo "Uploading $f..."
+                if [ -n "$AUTH_HEADER" ]; then
+                  code=$(curl -s -o /dev/null -w "%{http_code}" \
+                    -X POST "$BASE/api/v1/flows/upload/" \
+                    -H "$AUTH_HEADER" \
+                    -F "file=@${f}" || true)
+                else
+                  code=$(curl -s -o /dev/null -w "%{http_code}" \
+                    -X POST "$BASE/api/v1/flows/upload/" \
+                    -F "file=@${f}" || true)
+                fi
                 echo "  -> HTTP $code"
               done
-              echo "import complete"
+
+              echo "Import complete."
           env:
             - name: LANGFLOW_HOST
               value: {{ include "argo-stack.langflowService" . | quote }}
