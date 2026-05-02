@@ -87,8 +87,9 @@ ollama:
     pullPolicy: IfNotPresent
 
   service:
-    type: ClusterIP
+    type: NodePort
     port: 11434
+    nodePort: 31434   # Accessible from browser at http://localhost:31434
 
   storage:
     size: 30Gi
@@ -192,6 +193,23 @@ argo:
   passwords:
     operator: ""    # for argo_operator role (used by Helm post-install jobs)
     langflow: ""    # for argo_langflow role (used by Langflow connection)
+
+# -----------------------------------------------------------------------------
+# External LLM server (optional)
+#
+# Use this to connect Langflow to an external OpenAI-compatible server such as
+# LM Studio running on your local machine.
+#
+# Example for LM Studio:
+#   externalLLM:
+#     enabled: true
+#     url: "http://192.168.1.100:1234"
+#     type: "lmstudio"
+# -----------------------------------------------------------------------------
+externalLLM:
+  enabled: false
+  url: ""         # e.g. http://<your-laptop-ip>:1234
+  type: "lmstudio"  # lmstudio | openai-compatible
 
 # -----------------------------------------------------------------------------
 # Service accounts and RBAC

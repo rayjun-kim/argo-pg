@@ -14,6 +14,9 @@ spec:
       port: {{ .Values.ollama.service.port }}
       targetPort: 11434
       protocol: TCP
+      {{- if and (eq .Values.ollama.service.type "NodePort") .Values.ollama.service.nodePort }}
+      nodePort: {{ .Values.ollama.service.nodePort }}
+      {{- end }}
   selector:
     {{- include "argo-stack.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: ollama
