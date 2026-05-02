@@ -40,60 +40,47 @@ spec:
 
               # Get auth token
               echo "Getting auth token..."
-              TOKEN=$(curl -s -X POST "$BASE/api/v1/login" \
-                -H "Content-Type: application/x-www-form-urlencoded" \
-                -d "username=admin&password=admin" \
+              TOKEN=$(curl -s "$BASE/api/v1/auto_login" \
                 | grep -o '"access_token":"[^"]*"' \
                 | cut -d'"' -f4)
 
               if [ -z "$TOKEN" ]; then
-                TOKEN=$(curl -s "$BASE/api/v1/auto_login" \
+                TOKEN=$(curl -s -X POST "$BASE/api/v1/login" \
+                  -H "Content-Type: application/x-www-form-urlencoded" \
+                  -d "username=admin&password=admin" \
                   | grep -o '"access_token":"[^"]*"' \
                   | cut -d'"' -f4)
               fi
 
               if [ -z "$TOKEN" ]; then
-                echo "Warning: Could not get token, trying without auth..."
-                AUTH_HEADER=""
-              else
-                echo "Token obtained."
-                AUTH_HEADER="Authorization: Bearer $TOKEN"
+                echo "Error: Could not get auth token"
+                exit 1
               fi
+              echo "Token obtained."
 
-              # Fetch existing flow names to avoid duplicates
-              echo "Fetching existing flows..."
-              if [ -n "$AUTH_HEADER" ]; then
-                EXISTING=$(curl -s "$BASE/api/v1/flows/?page=1&size=100" \
-                  -H "$AUTH_HEADER" \
-                  | grep -o '"name":"[^"]*"' \
-                  | cut -d'"' -f4 || true)
-              else
-                EXISTING=$(curl -s "$BASE/api/v1/flows/?page=1&size=100" \
-                  | grep -o '"name":"[^"]*"' \
-                  | cut -d'"' -f4 || true)
-              fi
+              # Delete existing ARGO flows first (so we always upload fresh)
+              echo "Removing existing ARGO flows..."
+              curl -s --compressed "$BASE/api/v1/flows/?page=1&size=100" \
+                -H "Authorization: Bearer $TOKEN" \
+                -o /tmp/existing_flows.json
 
-              # Upload each flow only if its name doesn't already exist
+              for flow_id in $(cat /tmp/existing_flows.json \
+                | grep -o '"id":"[^"]*","name":"ARGO[^"]*"' \
+                | grep -o '"id":"[^"]*"' \
+                | cut -d'"' -f4); do
+                echo "  Deleting flow: $flow_id"
+                curl -s -X DELETE "$BASE/api/v1/flows/$flow_id" \
+                  -H "Authorization: Bearer $TOKEN" > /dev/null
+              done
+
+              # Upload all flows fresh
               for f in /flows/*.json; do
-                # Extract flow name from JSON
                 FLOW_NAME=$(grep -o '"name":"[^"]*"' "$f" | head -1 | cut -d'"' -f4)
-
-                if echo "$EXISTING" | grep -qF "$FLOW_NAME"; then
-                  echo "  Skipping '$FLOW_NAME' (already exists)"
-                  continue
-                fi
-
                 echo "Uploading '$FLOW_NAME'..."
-                if [ -n "$AUTH_HEADER" ]; then
-                  code=$(curl -s -o /dev/null -w "%{http_code}" \
-                    -X POST "$BASE/api/v1/flows/upload/" \
-                    -H "$AUTH_HEADER" \
-                    -F "file=@${f}" || true)
-                else
-                  code=$(curl -s -o /dev/null -w "%{http_code}" \
-                    -X POST "$BASE/api/v1/flows/upload/" \
-                    -F "file=@${f}" || true)
-                fi
+                code=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X POST "$BASE/api/v1/flows/upload/" \
+                  -H "Authorization: Bearer $TOKEN" \
+                  -F "file=@${f}")
                 echo "  -> HTTP $code"
               done
 
