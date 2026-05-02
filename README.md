@@ -17,9 +17,26 @@ This repository ships a complete, helm-installable stack:
 
 ## Quick start
 
-### 1. Install CNPG Operator (once per cluster)
+### Option A: Install script (recommended)
 
-CloudNativePG Operator must be installed cluster-wide before ARGO.
+```bash
+curl -O https://raw.githubusercontent.com/rayjun-kim/argo-pg/main/argo-install.sh
+chmod +x argo-install.sh
+./argo-install.sh install
+```
+
+Available commands:
+
+```bash
+./argo-install.sh install     # Install everything
+./argo-install.sh uninstall   # Remove everything (with confirmation)
+./argo-install.sh status      # Check current status
+./argo-install.sh help        # Show usage
+```
+
+### Option B: Manual install
+
+**Step 1. Install CNPG Operator (once per cluster)**
 
 ```bash
 helm repo add cnpg https://cloudnative-pg.github.io/charts
@@ -30,7 +47,7 @@ helm install cnpg cnpg/cloudnative-pg \
   --wait
 ```
 
-### 2. Install ARGO
+**Step 2. Install ARGO**
 
 ```bash
 helm repo add argo https://rayjun-kim.github.io/argo-pg
@@ -38,16 +55,30 @@ helm repo update
 helm install argo argo/argo-stack \
   --namespace argo \
   --create-namespace \
-  --set cloudnative-pg.enabled=false \
-  --wait
+  --set cloudnative-pg.enabled=false
 ```
 
-### 3. Access Langflow
+**Step 3. Access Langflow**
 
 ```bash
 kubectl -n argo port-forward svc/argo-argo-stack-langflow 7860:7860
-# Open http://localhost:7860 in your browser
+# Open http://localhost:7860
 ```
+
+> **Note:** Model download (gemma4:e2b ~7GB, nomic-embed-text ~270MB) runs
+> in the background. Check progress:
+> ```bash
+> kubectl logs -n argo -l app.kubernetes.io/component=ollama-model-pull -f
+> ```
+
+---
+
+## Requirements
+
+- Kubernetes cluster with `kubectl` configured
+- Helm 3.x
+- Cluster-admin permissions
+- Storage: ~40GB (30GB Ollama models + 10GB PostgreSQL)
 
 ---
 
@@ -55,17 +86,35 @@ kubectl -n argo port-forward svc/argo-argo-stack-langflow 7860:7860
 
 ```
 argo-pg/
-├── sql/argo--0.1.sql         The full ARGO schema (single file)
-├── langflow-components/      Six custom Langflow nodes:
-│                               ARGOEnqueue, ARGONextStep, ARGOSubmitResult,
+├── argo-install.sh           Install / uninstall / status script
+├── sql/argo--0.1.sql         Full ARGO schema (single file)
+├── langflow-components/      Six custom Langflow nodes
+│                               ARGOEnqueue, ARGONextStep, ARGOSubmitResult
 │                               ARGOSearchTools, ARGOToolRouter, ARGOEmbedder
 ├── langflow-flows/           Starter Flow JSONs (single / multi / embedder)
-├── charts/argo-stack/        The Helm chart (CNPG Cluster + Ollama + Langflow)
-├── examples/                 Hand-runnable SQL examples for direct DB use
-├── grafana-dashboards/       PostgreSQL data-source dashboards for monitoring
-├── docs/                     Concept docs and architecture diagrams
-└── .github/workflows/        Release automation (Helm repo on GitHub Pages)
+├── charts/argo-stack/        Helm chart (CNPG Cluster + Ollama + Langflow)
+├── examples/                 Hand-runnable SQL examples
+├── grafana-dashboards/       Grafana dashboard JSONs for monitoring
+├── docs/                     Architecture and Langflow guide
+└── .github/workflows/        Helm repo release automation (GitHub Pages)
 ```
+
+---
+
+## What gets installed
+
+| Component | Service | Port |
+|-----------|---------|------|
+| PostgreSQL (CNPG) | `argo-argo-stack-argo-pg-rw` | 5432 |
+| Ollama | `argo-argo-stack-ollama` | 11434 |
+| Langflow | `argo-argo-stack-langflow` | 7860 |
+
+Default models: `gemma4:e2b` (chat), `nomic-embed-text` (embeddings)
+
+Default sample data:
+- Agent: `sample_chat`
+- Tool: `sample_search` (MCP stub)
+- Flows: ARGO Single Agent, ARGO Multi Agent, ARGO Embedder
 
 ---
 
@@ -96,55 +145,53 @@ multi-agent delegation, human approval) lives in SQL.
 
 ## What's in the database
 
-| Table                       | Purpose |
-|-----------------------------|---------|
-| `agent_meta`                | Agent identity (1:1 with PG roles) |
-| `agent_profiles`            | System prompt, max_steps, max_retries |
-| `llm_configs`               | Provider, model, temperature |
+| Table | Purpose |
+|-------|---------|
+| `agent_meta` | Agent identity (1:1 with PG roles) |
+| `agent_profiles` | System prompt, max_steps, max_retries |
+| `llm_configs` | Provider, model, temperature |
 | `agent_profile_assignments` | Joins agent ↔ profile ↔ LLM |
-| `sessions` / `tasks`        | Execution state |
-| `task_dependencies`         | DAG edges (used for delegate) |
-| `agent_messages`            | Inter-agent instructions / results |
-| `execution_logs`            | Per-step message history |
-| `memory`                    | Long-term agent memory + pgvector |
-| `tool_registry`             | MCP-spec tools + custom (sql/http/custom) |
-| `agent_tool_permissions`    | Per-agent tool ACL |
-| `tool_executions`           | Audit log for tool calls |
-| `human_approvals`           | Human-in-the-loop queue |
-| `flow_registry`             | Maps Langflow flow names ↔ agents |
-| `agent_events`              | Monitoring event stream |
-| `embedding_config`          | Active embedding model + dims |
-| `sql_sandbox_allowlist`     | Views the SQL tool may read |
-| `system_agent_configs`      | Built-in compressor / embedder agents |
+| `sessions` / `tasks` | Execution state |
+| `task_dependencies` | DAG edges (used for delegate) |
+| `agent_messages` | Inter-agent instructions / results |
+| `execution_logs` | Per-step message history |
+| `memory` | Long-term agent memory + pgvector |
+| `tool_registry` | MCP-spec tools + custom extensions |
+| `agent_tool_permissions` | Per-agent tool ACL |
+| `tool_executions` | Audit log for tool calls |
+| `human_approvals` | Human-in-the-loop queue |
+| `flow_registry` | Maps Langflow flow names ↔ agents |
+| `agent_events` | Monitoring event stream |
+| `embedding_config` | Active embedding model + dims |
+| `sql_sandbox_allowlist` | Views the SQL tool may read |
+| `system_agent_configs` | Built-in compressor / embedder agents |
 
-Fourteen `argo_public.*` views and 32 functions form the API. Four PG roles
-(`argo_operator`, `argo_agent_base`, `argo_langflow`, `argo_sql_sandbox`, plus per-agent roles)
-isolate access.
+14 `argo_public.*` views and 32 functions form the API. Four PG roles
+(`argo_operator`, `argo_agent_base`, `argo_langflow`, `argo_sql_sandbox`)
+plus per-agent roles isolate access.
 
 ---
 
 ## Tool model
 
-Tools follow the MCP spec for `name`, `description`, and `input_schema`
-([reference](https://modelcontextprotocol.io/specification/server/tools)).
+Tools follow the MCP spec for `name`, `description`, and `input_schema`.
 Beyond MCP, ARGO supports three additional `tool_type`s:
 
-| `tool_type` | Where it runs                      | Configured fields                              |
-|-------------|------------------------------------|------------------------------------------------|
-| `mcp`       | External MCP server (Langflow MCP) | `mcp_server_url`, `mcp_server_name`            |
-| `http`      | Generic REST endpoint              | `http_endpoint`, `http_method`, `http_headers` |
-| `custom`    | Inline Python / JS                 | `custom_code`, `runtime`                       |
-| `sql`       | Inside the DB (SQL sandbox)        | (uses `sql_sandbox_allowlist`)                 |
+| `tool_type` | Where it runs | Configured fields |
+|-------------|---------------|-------------------|
+| `mcp` | External MCP server | `mcp_server_url`, `mcp_server_name` |
+| `http` | Generic REST endpoint | `http_endpoint`, `http_method`, `http_headers` |
+| `custom` | Inline Python / JS | `custom_code`, `runtime` |
+| `sql` | Inside the DB sandbox | (uses `sql_sandbox_allowlist`) |
 
-Tool descriptions are embedded by the embedder flow into `description_embedding`
-via pgvector, and `fn_search_tools` does cosine-similarity search filtered by
-`agent_tool_permissions` and the active `embedding_dims`. Rotating embedding
-models doesn't break anything — mismatched dims are filtered out, and
-re-embedding catches up.
+Tool descriptions are embedded by the Embedder flow via pgvector.
+`fn_search_tools` does cosine-similarity search filtered by agent permissions
+and active `embedding_dims`. Rotating embedding models doesn't break anything —
+mismatched dims are filtered out, re-embedding catches up gradually.
 
 ---
 
-## Multi-agent flow
+## Multi-agent
 
 Orchestrator emits:
 
@@ -152,17 +199,9 @@ Orchestrator emits:
 {"action":"delegate","to_agent":"researcher","task":"find Q3 earnings"}
 ```
 
-ARGO atomically:
-1. Creates a child task assigned to `researcher`.
-2. Adds a `task_dependencies` edge.
-3. Marks the parent task as `waiting`.
-4. Inserts an `agent_messages` instruction row.
-5. Returns `{action: wait_tasks, pending_task_ids: [...]}` to the orchestrator's flow.
-
-When the executor finishes, ARGO:
-1. Inserts a `result` row in `agent_messages`.
-2. Flips the parent task back to `pending` (if no other dependencies).
-3. Notifies via `pg_notify('argo_task_ready', ...)`.
+ARGO atomically creates a child task, adds a dependency edge, marks the parent
+as `waiting`, and returns `{action: wait_tasks}`. When the executor finishes,
+the parent is automatically flipped back to `pending`.
 
 ---
 
@@ -170,34 +209,28 @@ When the executor finishes, ARGO:
 
 ```sql
 SELECT argo_public.rotate_embedding_model(
-  'qwen3-embedding:4b',  -- new model
-  2560,                  -- new dimensions
-  'http://argo-ollama:11434'
+  'qwen3-embedding:4b', 2560, 'http://argo-argo-stack-ollama:11434'
 );
+-- Then run the ARGO Embedder flow to rebuild existing vectors
 ```
-
-Existing rows are NOT cleared — they're ignored by `fn_search_*` because
-their `embedding_dims` no longer match the active config. Run the ARGO
-Embedder flow to rebuild them at your own pace.
 
 ---
 
-## Helm chart configuration
+## Helm configuration
 
-See [`charts/argo-stack/values.yaml`](charts/argo-stack/values.yaml) and
-[`charts/argo-stack/README.md`](charts/argo-stack/README.md) for the full reference.
+See [`charts/argo-stack/values.yaml`](charts/argo-stack/values.yaml) for full reference.
 
 Common overrides:
 
 ```yaml
 ollama:
-  pullModels: ["llama3.2", "nomic-embed-text"]
+  pullModels: ["gemma4:e2b", "nomic-embed-text"]
   gpu:
-    enabled: true                # use NVIDIA GPUs
+    enabled: true
     nodeSelector: {gpu: "true"}
 
 postgresql:
-  instances: 3                   # HA: primary + 2 replicas
+  instances: 3       # HA: primary + 2 replicas
 
 langflow:
   ingress:
@@ -207,56 +240,44 @@ langflow:
     enabled: true
 ```
 
-> **Note:** `cloudnative-pg.enabled` is `false` by default. CNPG Operator
-> must be installed separately (see Quick start above). This avoids ownership
-> conflicts when CNPG is already present in the cluster.
+> `cloudnative-pg.enabled` defaults to `false`. CNPG Operator must be
+> installed separately to avoid ownership conflicts.
 
 ---
 
 ## Monitoring
 
-Pre-built Grafana dashboards in [`grafana-dashboards/`](grafana-dashboards/):
+Import the Grafana dashboards from [`grafana-dashboards/`](grafana-dashboards/)
+using your CNPG PostgreSQL RW service as the data source:
 
-- `argo-overview.json` — Sessions, tasks, errors, tool latencies
+- `argo-overview.json` — Sessions, tasks, tool latencies, errors
 - `argo-agents.json` — Per-agent activity and step counts
-
-Add your CNPG PostgreSQL RW service as a Grafana data source, then import
-the JSON files. CNPG ships its own PG-infra dashboards; together they cover
-the full stack.
 
 ---
 
 ## Local development
 
 ```bash
-# Render the chart without installing
-helm template argo charts/argo-stack \
-  --set cloudnative-pg.enabled=false > /tmp/manifests.yaml
-
-# Static analysis
+# Lint
 helm lint charts/argo-stack
 
-# Dry-run install
+# Dry-run
 helm install argo charts/argo-stack \
   -n argo --create-namespace \
   --set cloudnative-pg.enabled=false \
   --dry-run --debug
-```
 
-Building the Flow JSONs from sources:
-
-```bash
-cd langflow-flows
-python3 build_flows.py
+# Rebuild Flow JSONs
+cd langflow-flows && python3 build_flows.py
 ```
 
 ---
 
 ## Project status
 
-Research-grade prototype. Production hardening to layer on top: CNPG-I plugin
-packaging, Barman Cloud backup integration, fine-grained ingress auth, and
-PodSecurity standards.
+Research-grade prototype. Production hardening roadmap: CNPG-I plugin
+packaging, Barman Cloud backup, fine-grained ingress auth, PodSecurity
+standards.
 
 ---
 
