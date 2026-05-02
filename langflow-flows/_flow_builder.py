@@ -136,14 +136,19 @@ def _code_field(code: str) -> dict[str, Any]:
 
 def _output(name: str, display_name: str, method: str,
             types: list[str] | None = None) -> dict[str, Any]:
+    """Output definition compatible with Langflow 1.9+"""
+    t = types or ["Data"]
     return {
         "name": name,
         "display_name": display_name,
         "method": method,
-        "types": types or ["Data"],
-        "selected": (types or ["Data"])[0],
+        "types": t,
+        "selected": t[0],
         "value": "__UNDEFINED__",
         "cache": True,
+        "allows_loop": False,
+        "group_outputs": False,
+        "tool_mode": False,
     }
 
 
