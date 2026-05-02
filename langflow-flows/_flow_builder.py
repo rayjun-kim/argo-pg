@@ -200,6 +200,25 @@ def make_node(
 # Edge builder
 # ---------------------------------------------------------------------------
 
+# Langflow 1.9 uses the œ character (U+0153) instead of quotes inside
+# sourceHandle / targetHandle strings.
+_Q = "œ"  # œ
+
+
+def _encode_handle(d: dict[str, Any]) -> str:
+    """Encode a handle dict using œ as quote character (Langflow 1.9 format)."""
+    parts = []
+    for k, v in d.items():
+        key = f"{_Q}{k}{_Q}"
+        if isinstance(v, list):
+            items = ", ".join(f"{_Q}{i}{_Q}" for i in v)
+            val = f"[{items}]"
+        else:
+            val = f"{_Q}{v}{_Q}"
+        parts.append(f"{key}: {val}")
+    return "{" + ", ".join(parts) + "}"
+
+
 def make_edge(
     *,
     source_node: dict[str, Any],
@@ -210,7 +229,6 @@ def make_edge(
     source_id = source_node["id"]
     target_id = target_node["id"]
 
-    # Find the source output's "types" so the wire colour matches.
     out = next(
         (o for o in source_node["data"]["node"]["outputs"]
          if o["name"] == source_output_name),
@@ -225,29 +243,34 @@ def make_edge(
         raise ValueError(f"unknown input {target_input_name!r} on {target_id}")
     input_types = in_field.get("input_types") or ["Data"]
 
-    source_handle = {
+    source_handle_obj = {
         "dataType": source_node["data"]["type"],
         "id": source_id,
         "name": source_output_name,
         "output_types": output_types,
     }
-    target_handle = {
+    target_handle_obj = {
         "fieldName": target_input_name,
         "id": target_id,
         "inputTypes": input_types,
-        "type": "other",
+        "type": "str",
     }
+
+    sh_str = _encode_handle(source_handle_obj)
+    th_str = _encode_handle(target_handle_obj)
 
     return {
         "source": source_id,
         "target": target_id,
-        "sourceHandle": json.dumps(source_handle, separators=(",", ":")),
-        "targetHandle": json.dumps(target_handle, separators=(",", ":")),
+        "sourceHandle": sh_str,
+        "targetHandle": th_str,
         "data": {
-            "sourceHandle": source_handle,
-            "targetHandle": target_handle,
+            "sourceHandle": source_handle_obj,
+            "targetHandle": target_handle_obj,
         },
-        "id": f"reactflow__edge-{source_id}{source_output_name}-{target_id}{target_input_name}",
+        "id": f"xy-edge__{source_id}{sh_str}-{target_id}{th_str}",
+        "animated": False,
+        "selected": False,
     }
 
 

@@ -550,8 +550,8 @@
       {
         "source": "ARGOEnqueue-tDKiq5",
         "target": "ARGONextStep-us1x8L",
-        "sourceHandle": "{\"dataType\":\"ARGOEnqueue\",\"id\":\"ARGOEnqueue-tDKiq5\",\"name\":\"task_info\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"task_id\",\"id\":\"ARGONextStep-us1x8L\",\"inputTypes\":[\"Data\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGOEnqueueœ, œidœ: œARGOEnqueue-tDKiq5œ, œnameœ: œtask_infoœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œtask_idœ, œidœ: œARGONextStep-us1x8Lœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGOEnqueue",
@@ -567,16 +567,18 @@
             "inputTypes": [
               "Data"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGOEnqueue-tDKiq5task_info-ARGONextStep-us1x8Ltask_id"
+        "id": "xy-edge__ARGOEnqueue-tDKiq5{œdataTypeœ: œARGOEnqueueœ, œidœ: œARGOEnqueue-tDKiq5œ, œnameœ: œtask_infoœ, œoutput_typesœ: [œDataœ]}-ARGONextStep-us1x8L{œfieldNameœ: œtask_idœ, œidœ: œARGONextStep-us1x8Lœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "ARGONextStep-us1x8L",
         "target": "OllamaModel-8dOdOt",
-        "sourceHandle": "{\"dataType\":\"ARGONextStep\",\"id\":\"ARGONextStep-us1x8L\",\"name\":\"step\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"input_value\",\"id\":\"OllamaModel-8dOdOt\",\"inputTypes\":[\"Message\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGONextStepœ, œidœ: œARGONextStep-us1x8Lœ, œnameœ: œstepœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œinput_valueœ, œidœ: œOllamaModel-8dOdOtœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGONextStep",
@@ -592,16 +594,18 @@
             "inputTypes": [
               "Message"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGONextStep-us1x8Lstep-OllamaModel-8dOdOtinput_value"
+        "id": "xy-edge__ARGONextStep-us1x8L{œdataTypeœ: œARGONextStepœ, œidœ: œARGONextStep-us1x8Lœ, œnameœ: œstepœ, œoutput_typesœ: [œDataœ]}-OllamaModel-8dOdOt{œfieldNameœ: œinput_valueœ, œidœ: œOllamaModel-8dOdOtœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "OllamaModel-8dOdOt",
         "target": "ARGOSubmitResult-z9GzcA",
-        "sourceHandle": "{\"dataType\":\"OllamaModel\",\"id\":\"OllamaModel-8dOdOt\",\"name\":\"text_output\",\"output_types\":[\"Message\"]}",
-        "targetHandle": "{\"fieldName\":\"response\",\"id\":\"ARGOSubmitResult-z9GzcA\",\"inputTypes\":[\"Message\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œOllamaModelœ, œidœ: œOllamaModel-8dOdOtœ, œnameœ: œtext_outputœ, œoutput_typesœ: [œMessageœ]}",
+        "targetHandle": "{œfieldNameœ: œresponseœ, œidœ: œARGOSubmitResult-z9GzcAœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "OllamaModel",
@@ -617,16 +621,18 @@
             "inputTypes": [
               "Message"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-OllamaModel-8dOdOttext_output-ARGOSubmitResult-z9GzcAresponse"
+        "id": "xy-edge__OllamaModel-8dOdOt{œdataTypeœ: œOllamaModelœ, œidœ: œOllamaModel-8dOdOtœ, œnameœ: œtext_outputœ, œoutput_typesœ: [œMessageœ]}-ARGOSubmitResult-z9GzcA{œfieldNameœ: œresponseœ, œidœ: œARGOSubmitResult-z9GzcAœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "ARGONextStep-us1x8L",
         "target": "ARGOSubmitResult-z9GzcA",
-        "sourceHandle": "{\"dataType\":\"ARGONextStep\",\"id\":\"ARGONextStep-us1x8L\",\"name\":\"step\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"task_id\",\"id\":\"ARGOSubmitResult-z9GzcA\",\"inputTypes\":[\"Data\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGONextStepœ, œidœ: œARGONextStep-us1x8Lœ, œnameœ: œstepœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œtask_idœ, œidœ: œARGOSubmitResult-z9GzcAœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGONextStep",
@@ -642,16 +648,18 @@
             "inputTypes": [
               "Data"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGONextStep-us1x8Lstep-ARGOSubmitResult-z9GzcAtask_id"
+        "id": "xy-edge__ARGONextStep-us1x8L{œdataTypeœ: œARGONextStepœ, œidœ: œARGONextStep-us1x8Lœ, œnameœ: œstepœ, œoutput_typesœ: [œDataœ]}-ARGOSubmitResult-z9GzcA{œfieldNameœ: œtask_idœ, œidœ: œARGOSubmitResult-z9GzcAœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "ARGOSubmitResult-z9GzcA",
         "target": "ARGONextStep-us1x8L",
-        "sourceHandle": "{\"dataType\":\"ARGOSubmitResult\",\"id\":\"ARGOSubmitResult-z9GzcA\",\"name\":\"continue_out\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"task_id\",\"id\":\"ARGONextStep-us1x8L\",\"inputTypes\":[\"Data\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGOSubmitResultœ, œidœ: œARGOSubmitResult-z9GzcAœ, œnameœ: œcontinue_outœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œtask_idœ, œidœ: œARGONextStep-us1x8Lœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGOSubmitResult",
@@ -667,16 +675,18 @@
             "inputTypes": [
               "Data"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGOSubmitResult-z9GzcAcontinue_out-ARGONextStep-us1x8Ltask_id"
+        "id": "xy-edge__ARGOSubmitResult-z9GzcA{œdataTypeœ: œARGOSubmitResultœ, œidœ: œARGOSubmitResult-z9GzcAœ, œnameœ: œcontinue_outœ, œoutput_typesœ: [œDataœ]}-ARGONextStep-us1x8L{œfieldNameœ: œtask_idœ, œidœ: œARGONextStep-us1x8Lœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "ARGOSubmitResult-z9GzcA",
         "target": "ARGOToolRouter-vwSkob",
-        "sourceHandle": "{\"dataType\":\"ARGOSubmitResult\",\"id\":\"ARGOSubmitResult-z9GzcA\",\"name\":\"invoke_tool_out\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"invoke_payload\",\"id\":\"ARGOToolRouter-vwSkob\",\"inputTypes\":[\"Data\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGOSubmitResultœ, œidœ: œARGOSubmitResult-z9GzcAœ, œnameœ: œinvoke_tool_outœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œinvoke_payloadœ, œidœ: œARGOToolRouter-vwSkobœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGOSubmitResult",
@@ -692,10 +702,12 @@
             "inputTypes": [
               "Data"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGOSubmitResult-z9GzcAinvoke_tool_out-ARGOToolRouter-vwSkobinvoke_payload"
+        "id": "xy-edge__ARGOSubmitResult-z9GzcA{œdataTypeœ: œARGOSubmitResultœ, œidœ: œARGOSubmitResult-z9GzcAœ, œnameœ: œinvoke_tool_outœ, œoutput_typesœ: [œDataœ]}-ARGOToolRouter-vwSkob{œfieldNameœ: œinvoke_payloadœ, œidœ: œARGOToolRouter-vwSkobœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       }
     ],
     "viewport": {

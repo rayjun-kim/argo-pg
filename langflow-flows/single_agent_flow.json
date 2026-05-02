@@ -75,7 +75,7 @@
                 "type": "code",
                 "required": true,
                 "show": false,
-                "value": "\"\"\"ARGOEnqueue: start an agent execution by inserting a task into ARGO.\n\nThis is typically the FIRST node in any ARGO flow.\n\"\"\"\n\nfrom __future__ import annotations\n\nfrom langflow.custom import Component\nfrom langflow.io import MessageTextInput, IntInput, Output\nfrom langflow.schema import Data\n\nfrom ._argo_db import call_function\n\n\nclass ARGOEnqueue(Component):\n    display_name = \"ARGO Enqueue\"\n    description = (\n        \"Enqueue a task for an ARGO agent. \"\n        \"Returns task_id and session_id for downstream components.\"\n    )\n    icon = \"play\"\n    name = \"ARGOEnqueue\"\n\n    inputs = [\n        MessageTextInput(\n            name=\"agent_role\",\n            display_name=\"Agent Role\",\n            info=\"PostgreSQL role name of the target agent (e.g. 'researcher').\",\n            required=True,\n        ),\n        MessageTextInput(\n            name=\"task\",\n            display_name=\"Task\",\n            info=\"Natural-language task description for the agent.\",\n            required=True,\n        ),\n        IntInput(\n            name=\"session_id\",\n            display_name=\"Session ID\",\n            info=\"Optional. Reuse an existing session by ID. Leave empty to create a new one.\",\n            required=False,\n        ),\n    ]\n\n    outputs = [\n        Output(\n            name=\"task_info\",\n            display_name=\"Task Info\",\n            method=\"enqueue\",\n        ),\n    ]\n\n    def enqueue(self) -> Data:\n        agent_role = (self.agent_role or \"\").strip()\n        task_text  = (self.task or \"\").strip()\n\n        if not agent_role:\n            raise ValueError(\"ARGOEnqueue: 'agent_role' is required.\")\n        if not task_text:\n            raise ValueError(\"ARGOEnqueue: 'task' is required.\")\n\n        session_id = None\n        if self.session_id is not None and str(self.session_id).strip() != \"\":\n            try:\n                session_id = int(self.session_id)\n            except (TypeError, ValueError):\n                session_id = None\n\n        result = call_function(\n            \"SELECT argo_public.run_agent(%s, %s, %s)\",\n            (agent_role, task_text, session_id),\n        )\n\n        # result is JSONB -> dict via psycopg2\n        if not isinstance(result, dict):\n            raise RuntimeError(f\"ARGOEnqueue: unexpected response: {result!r}\")\n\n        self.status = (\n            f\"Enqueued task #{result.get('task_id')} \"\n            f\"in session #{result.get('session_id')}\"\n        )\n        return Data(data=result)\n",
+                "value": "\"\"\"ARGOEnqueue: start an agent execution by inserting a task into ARGO.\n\nThis is typically the FIRST node in any ARGO flow.\n\"\"\"\n\nfrom __future__ import annotations\n\nfrom langflow.custom import Component\nfrom langflow.io import MessageTextInput, IntInput, Output\nfrom langflow.schema import Data\n\nfrom _argo_db import call_function\n\n\nclass ARGOEnqueue(Component):\n    display_name = \"ARGO Enqueue\"\n    description = (\n        \"Enqueue a task for an ARGO agent. \"\n        \"Returns task_id and session_id for downstream components.\"\n    )\n    icon = \"play\"\n    name = \"ARGOEnqueue\"\n\n    inputs = [\n        MessageTextInput(\n            name=\"agent_role\",\n            display_name=\"Agent Role\",\n            info=\"PostgreSQL role name of the target agent (e.g. 'researcher').\",\n            required=True,\n        ),\n        MessageTextInput(\n            name=\"task\",\n            display_name=\"Task\",\n            info=\"Natural-language task description for the agent.\",\n            required=True,\n        ),\n        IntInput(\n            name=\"session_id\",\n            display_name=\"Session ID\",\n            info=\"Optional. Reuse an existing session by ID. Leave empty to create a new one.\",\n            required=False,\n        ),\n    ]\n\n    outputs = [\n        Output(\n            name=\"task_info\",\n            display_name=\"Task Info\",\n            method=\"enqueue\",\n        ),\n    ]\n\n    def enqueue(self) -> Data:\n        agent_role = (self.agent_role or \"\").strip()\n        task_text  = (self.task or \"\").strip()\n\n        if not agent_role:\n            raise ValueError(\"ARGOEnqueue: 'agent_role' is required.\")\n        if not task_text:\n            raise ValueError(\"ARGOEnqueue: 'task' is required.\")\n\n        session_id = None\n        if self.session_id is not None and str(self.session_id).strip() != \"\":\n            try:\n                session_id = int(self.session_id)\n            except (TypeError, ValueError):\n                session_id = None\n\n        result = call_function(\n            \"SELECT argo_public.run_agent(%s, %s, %s)\",\n            (agent_role, task_text, session_id),\n        )\n\n        # result is JSONB -> dict via psycopg2\n        if not isinstance(result, dict):\n            raise RuntimeError(f\"ARGOEnqueue: unexpected response: {result!r}\")\n\n        self.status = (\n            f\"Enqueued task #{result.get('task_id')} \"\n            f\"in session #{result.get('session_id')}\"\n        )\n        return Data(data=result)\n",
                 "fileTypes": [],
                 "name": "code",
                 "advanced": true,
@@ -93,7 +93,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               }
             ],
             "base_classes": [
@@ -159,7 +162,7 @@
                 "type": "code",
                 "required": true,
                 "show": false,
-                "value": "\"\"\"ARGONextStep: ask the ARGO control plane what to do next for a task.\n\nReturns the action ('call_llm', 'wait_tasks', 'wait_approval', 'done')\nplus messages, llm_config, tools and (optionally) memory snippets.\n\nOptional input `query_embedding` triggers a memory search inside fn_next_step.\n\"\"\"\n\nfrom __future__ import annotations\n\nfrom typing import Any\n\nfrom langflow.custom import Component\nfrom langflow.io import IntInput, DataInput, Output\nfrom langflow.schema import Data\n\nfrom ._argo_db import call_function, vector_literal\n\n\nclass ARGONextStep(Component):\n    display_name = \"ARGO Next Step\"\n    description = (\n        \"Call argo_public.fn_next_step(task_id) and return the next action. \"\n        \"Optionally pass a query embedding to inject relevant memory.\"\n    )\n    icon = \"step-forward\"\n    name = \"ARGONextStep\"\n\n    inputs = [\n        IntInput(\n            name=\"task_id\",\n            display_name=\"Task ID\",\n            info=\"Task to advance. Usually piped from ARGO Enqueue or a previous Submit Result.\",\n            required=True,\n        ),\n        DataInput(\n            name=\"query_embedding\",\n            display_name=\"Query Embedding\",\n            info=\"Optional. List[float] for memory search. Skip if no memory injection is needed.\",\n            required=False,\n        ),\n        IntInput(\n            name=\"memory_limit\",\n            display_name=\"Memory Limit\",\n            info=\"Top-k memory rows to inject when query_embedding is provided.\",\n            value=5,\n            required=False,\n        ),\n    ]\n\n    outputs = [\n        Output(\n            name=\"step\",\n            display_name=\"Step\",\n            method=\"next_step\",\n        ),\n    ]\n\n    def next_step(self) -> Data:\n        try:\n            task_id = int(self.task_id)\n        except (TypeError, ValueError) as exc:\n            raise ValueError(\"ARGONextStep: 'task_id' must be an integer.\") from exc\n\n        embedding = self._extract_embedding(self.query_embedding)\n\n        if embedding is None:\n            sql = \"SELECT argo_public.fn_next_step(%s, NULL, %s)\"\n            params: tuple[Any, ...] = (task_id, int(self.memory_limit or 5))\n        else:\n            sql = \"SELECT argo_public.fn_next_step(%s, %s::vector, %s)\"\n            params = (task_id, vector_literal(embedding), int(self.memory_limit or 5))\n\n        result = call_function(sql, params)\n\n        if not isinstance(result, dict):\n            raise RuntimeError(f\"ARGONextStep: unexpected response: {result!r}\")\n\n        action = result.get(\"action\", \"?\")\n        self.status = f\"action={action} task_id={task_id}\"\n        return Data(data=result)\n\n    @staticmethod\n    def _extract_embedding(value: Any) -> list[float] | None:\n        if value is None:\n            return None\n        # DataInput delivers either a Data object or a raw list/dict\n        if hasattr(value, \"data\"):\n            value = value.data\n        if isinstance(value, dict):\n            value = value.get(\"embedding\") or value.get(\"vector\") or value.get(\"data\")\n        if isinstance(value, list) and value and isinstance(value[0], (int, float)):\n            return [float(x) for x in value]\n        return None\n",
+                "value": "\"\"\"ARGONextStep: ask the ARGO control plane what to do next for a task.\n\nReturns the action ('call_llm', 'wait_tasks', 'wait_approval', 'done')\nplus messages, llm_config, tools and (optionally) memory snippets.\n\nOptional input `query_embedding` triggers a memory search inside fn_next_step.\n\"\"\"\n\nfrom __future__ import annotations\n\nfrom typing import Any\n\nfrom langflow.custom import Component\nfrom langflow.io import IntInput, DataInput, Output\nfrom langflow.schema import Data\n\nfrom _argo_db import call_function, vector_literal\n\n\nclass ARGONextStep(Component):\n    display_name = \"ARGO Next Step\"\n    description = (\n        \"Call argo_public.fn_next_step(task_id) and return the next action. \"\n        \"Optionally pass a query embedding to inject relevant memory.\"\n    )\n    icon = \"step-forward\"\n    name = \"ARGONextStep\"\n\n    inputs = [\n        IntInput(\n            name=\"task_id\",\n            display_name=\"Task ID\",\n            info=\"Task to advance. Usually piped from ARGO Enqueue or a previous Submit Result.\",\n            required=True,\n        ),\n        DataInput(\n            name=\"query_embedding\",\n            display_name=\"Query Embedding\",\n            info=\"Optional. List[float] for memory search. Skip if no memory injection is needed.\",\n            required=False,\n        ),\n        IntInput(\n            name=\"memory_limit\",\n            display_name=\"Memory Limit\",\n            info=\"Top-k memory rows to inject when query_embedding is provided.\",\n            value=5,\n            required=False,\n        ),\n    ]\n\n    outputs = [\n        Output(\n            name=\"step\",\n            display_name=\"Step\",\n            method=\"next_step\",\n        ),\n    ]\n\n    def next_step(self) -> Data:\n        try:\n            task_id = int(self.task_id)\n        except (TypeError, ValueError) as exc:\n            raise ValueError(\"ARGONextStep: 'task_id' must be an integer.\") from exc\n\n        embedding = self._extract_embedding(self.query_embedding)\n\n        if embedding is None:\n            sql = \"SELECT argo_public.fn_next_step(%s, NULL, %s)\"\n            params: tuple[Any, ...] = (task_id, int(self.memory_limit or 5))\n        else:\n            sql = \"SELECT argo_public.fn_next_step(%s, %s::vector, %s)\"\n            params = (task_id, vector_literal(embedding), int(self.memory_limit or 5))\n\n        result = call_function(sql, params)\n\n        if not isinstance(result, dict):\n            raise RuntimeError(f\"ARGONextStep: unexpected response: {result!r}\")\n\n        action = result.get(\"action\", \"?\")\n        self.status = f\"action={action} task_id={task_id}\"\n        return Data(data=result)\n\n    @staticmethod\n    def _extract_embedding(value: Any) -> list[float] | None:\n        if value is None:\n            return None\n        # DataInput delivers either a Data object or a raw list/dict\n        if hasattr(value, \"data\"):\n            value = value.data\n        if isinstance(value, dict):\n            value = value.get(\"embedding\") or value.get(\"vector\") or value.get(\"data\")\n        if isinstance(value, list) and value and isinstance(value[0], (int, float)):\n            return [float(x) for x in value]\n        return None\n",
                 "fileTypes": [],
                 "name": "code",
                 "advanced": true,
@@ -177,7 +180,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               }
             ],
             "base_classes": [
@@ -357,7 +363,7 @@
                 "type": "code",
                 "required": true,
                 "show": false,
-                "value": "\"\"\"ARGOSubmitResult: submit an LLM response to ARGO and route on the next action.\n\nThis component has FIVE output ports so that downstream wiring stays declarative:\n  - continue       : loop back to ARGO Next Step\n  - done           : terminal; carries final output and need_embedding flag\n  - invoke_tool    : carries tool_info + args for ARGO Tool Router\n  - wait_tasks     : delegate happened; carries pending child task ids\n  - wait_approval  : human approval requested\n\nOnly the matching output is populated for a given run; others return None.\n\"\"\"\n\nfrom __future__ import annotations\n\nfrom typing import Any\n\nfrom langflow.custom import Component\nfrom langflow.io import IntInput, MessageTextInput, BoolInput, Output\nfrom langflow.schema import Data\n\nfrom ._argo_db import call_function\n\n\nclass ARGOSubmitResult(Component):\n    display_name = \"ARGO Submit Result\"\n    description = (\n        \"Submit the LLM response to argo_public.fn_submit_result. \"\n        \"Routes the next action to one of five output ports.\"\n    )\n    icon = \"send\"\n    name = \"ARGOSubmitResult\"\n\n    inputs = [\n        IntInput(\n            name=\"task_id\",\n            display_name=\"Task ID\",\n            info=\"Task this response belongs to.\",\n            required=True,\n        ),\n        MessageTextInput(\n            name=\"response\",\n            display_name=\"LLM Response\",\n            info=\"Raw LLM output text. JSON-shaped responses are parsed by ARGO.\",\n            required=True,\n        ),\n        BoolInput(\n            name=\"is_final\",\n            display_name=\"Force Final\",\n            info=\"If true, the task is marked completed regardless of response content.\",\n            value=False,\n            required=False,\n        ),\n    ]\n\n    outputs = [\n        Output(name=\"continue_out\",     display_name=\"continue\",       method=\"route_continue\"),\n        Output(name=\"done_out\",         display_name=\"done\",           method=\"route_done\"),\n        Output(name=\"invoke_tool_out\",  display_name=\"invoke_tool\",    method=\"route_invoke_tool\"),\n        Output(name=\"wait_tasks_out\",   display_name=\"wait_tasks\",     method=\"route_wait_tasks\"),\n        Output(name=\"wait_approval_out\",display_name=\"wait_approval\",  method=\"route_wait_approval\"),\n    ]\n\n    # ---------------------------------------------------------------------\n    # Internal helper: call DB once, cache the parsed response on self.\n    # ---------------------------------------------------------------------\n    def _submit(self) -> dict[str, Any]:\n        cached = getattr(self, \"_argo_result\", None)\n        if cached is not None:\n            return cached\n\n        try:\n            task_id = int(self.task_id)\n        except (TypeError, ValueError) as exc:\n            raise ValueError(\"ARGOSubmitResult: 'task_id' must be an integer.\") from exc\n\n        response = self.response\n        # Allow Message/Data inputs in addition to plain strings.\n        if hasattr(response, \"text\"):\n            response = response.text\n        if hasattr(response, \"data\") and isinstance(response.data, dict):\n            response = response.data.get(\"text\") or str(response.data)\n        response = \"\" if response is None else str(response)\n\n        result = call_function(\n            \"SELECT argo_public.fn_submit_result(%s, %s, %s)\",\n            (task_id, response, bool(self.is_final)),\n        )\n        if not isinstance(result, dict):\n            raise RuntimeError(f\"ARGOSubmitResult: unexpected response: {result!r}\")\n\n        self._argo_result = result\n        self.status = f\"action={result.get('action')}\"\n        return result\n\n    # ---------------------------------------------------------------------\n    # Five route methods. Each returns Data only if the action matches.\n    # ---------------------------------------------------------------------\n    def route_continue(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"continue\":\n            # Echo task_id so the next ARGO Next Step can use it directly.\n            return Data(data={\"task_id\": int(self.task_id), **r})\n        self.stop(\"continue_out\")\n        return None\n\n    def route_done(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"done\":\n            return Data(data=r)\n        self.stop(\"done_out\")\n        return None\n\n    def route_invoke_tool(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"invoke_tool\":\n            return Data(data=r)\n        self.stop(\"invoke_tool_out\")\n        return None\n\n    def route_wait_tasks(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"wait_tasks\":\n            return Data(data=r)\n        self.stop(\"wait_tasks_out\")\n        return None\n\n    def route_wait_approval(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"wait_approval\":\n            return Data(data=r)\n        self.stop(\"wait_approval_out\")\n        return None\n",
+                "value": "\"\"\"ARGOSubmitResult: submit an LLM response to ARGO and route on the next action.\n\nThis component has FIVE output ports so that downstream wiring stays declarative:\n  - continue       : loop back to ARGO Next Step\n  - done           : terminal; carries final output and need_embedding flag\n  - invoke_tool    : carries tool_info + args for ARGO Tool Router\n  - wait_tasks     : delegate happened; carries pending child task ids\n  - wait_approval  : human approval requested\n\nOnly the matching output is populated for a given run; others return None.\n\"\"\"\n\nfrom __future__ import annotations\n\nfrom typing import Any\n\nfrom langflow.custom import Component\nfrom langflow.io import IntInput, MessageTextInput, BoolInput, Output\nfrom langflow.schema import Data\n\nfrom _argo_db import call_function\n\n\nclass ARGOSubmitResult(Component):\n    display_name = \"ARGO Submit Result\"\n    description = (\n        \"Submit the LLM response to argo_public.fn_submit_result. \"\n        \"Routes the next action to one of five output ports.\"\n    )\n    icon = \"send\"\n    name = \"ARGOSubmitResult\"\n\n    inputs = [\n        IntInput(\n            name=\"task_id\",\n            display_name=\"Task ID\",\n            info=\"Task this response belongs to.\",\n            required=True,\n        ),\n        MessageTextInput(\n            name=\"response\",\n            display_name=\"LLM Response\",\n            info=\"Raw LLM output text. JSON-shaped responses are parsed by ARGO.\",\n            required=True,\n        ),\n        BoolInput(\n            name=\"is_final\",\n            display_name=\"Force Final\",\n            info=\"If true, the task is marked completed regardless of response content.\",\n            value=False,\n            required=False,\n        ),\n    ]\n\n    outputs = [\n        Output(name=\"continue_out\",     display_name=\"continue\",       method=\"route_continue\"),\n        Output(name=\"done_out\",         display_name=\"done\",           method=\"route_done\"),\n        Output(name=\"invoke_tool_out\",  display_name=\"invoke_tool\",    method=\"route_invoke_tool\"),\n        Output(name=\"wait_tasks_out\",   display_name=\"wait_tasks\",     method=\"route_wait_tasks\"),\n        Output(name=\"wait_approval_out\",display_name=\"wait_approval\",  method=\"route_wait_approval\"),\n    ]\n\n    # ---------------------------------------------------------------------\n    # Internal helper: call DB once, cache the parsed response on self.\n    # ---------------------------------------------------------------------\n    def _submit(self) -> dict[str, Any]:\n        cached = getattr(self, \"_argo_result\", None)\n        if cached is not None:\n            return cached\n\n        try:\n            task_id = int(self.task_id)\n        except (TypeError, ValueError) as exc:\n            raise ValueError(\"ARGOSubmitResult: 'task_id' must be an integer.\") from exc\n\n        response = self.response\n        # Allow Message/Data inputs in addition to plain strings.\n        if hasattr(response, \"text\"):\n            response = response.text\n        if hasattr(response, \"data\") and isinstance(response.data, dict):\n            response = response.data.get(\"text\") or str(response.data)\n        response = \"\" if response is None else str(response)\n\n        result = call_function(\n            \"SELECT argo_public.fn_submit_result(%s, %s, %s)\",\n            (task_id, response, bool(self.is_final)),\n        )\n        if not isinstance(result, dict):\n            raise RuntimeError(f\"ARGOSubmitResult: unexpected response: {result!r}\")\n\n        self._argo_result = result\n        self.status = f\"action={result.get('action')}\"\n        return result\n\n    # ---------------------------------------------------------------------\n    # Five route methods. Each returns Data only if the action matches.\n    # ---------------------------------------------------------------------\n    def route_continue(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"continue\":\n            # Echo task_id so the next ARGO Next Step can use it directly.\n            return Data(data={\"task_id\": int(self.task_id), **r})\n        self.stop(\"continue_out\")\n        return None\n\n    def route_done(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"done\":\n            return Data(data=r)\n        self.stop(\"done_out\")\n        return None\n\n    def route_invoke_tool(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"invoke_tool\":\n            return Data(data=r)\n        self.stop(\"invoke_tool_out\")\n        return None\n\n    def route_wait_tasks(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"wait_tasks\":\n            return Data(data=r)\n        self.stop(\"wait_tasks_out\")\n        return None\n\n    def route_wait_approval(self) -> Data | None:\n        r = self._submit()\n        if r.get(\"action\") == \"wait_approval\":\n            return Data(data=r)\n        self.stop(\"wait_approval_out\")\n        return None\n",
                 "fileTypes": [],
                 "name": "code",
                 "advanced": true,
@@ -375,7 +381,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               },
               {
                 "name": "done_out",
@@ -386,7 +395,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               },
               {
                 "name": "invoke_tool_out",
@@ -397,7 +409,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               },
               {
                 "name": "wait_tasks_out",
@@ -408,7 +423,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               },
               {
                 "name": "wait_approval_out",
@@ -419,7 +437,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               }
             ],
             "base_classes": [
@@ -481,7 +502,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               },
               {
                 "name": "http_out",
@@ -492,7 +516,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               },
               {
                 "name": "custom_out",
@@ -503,7 +530,10 @@
                 ],
                 "selected": "Data",
                 "value": "__UNDEFINED__",
-                "cache": true
+                "cache": true,
+                "allows_loop": false,
+                "group_outputs": false,
+                "tool_mode": false
               }
             ],
             "base_classes": [
@@ -520,8 +550,8 @@
       {
         "source": "ARGOEnqueue-tDKiq5",
         "target": "ARGONextStep-us1x8L",
-        "sourceHandle": "{\"dataType\":\"ARGOEnqueue\",\"id\":\"ARGOEnqueue-tDKiq5\",\"name\":\"task_info\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"task_id\",\"id\":\"ARGONextStep-us1x8L\",\"inputTypes\":[\"Data\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGOEnqueueœ, œidœ: œARGOEnqueue-tDKiq5œ, œnameœ: œtask_infoœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œtask_idœ, œidœ: œARGONextStep-us1x8Lœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGOEnqueue",
@@ -537,16 +567,18 @@
             "inputTypes": [
               "Data"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGOEnqueue-tDKiq5task_info-ARGONextStep-us1x8Ltask_id"
+        "id": "xy-edge__ARGOEnqueue-tDKiq5{œdataTypeœ: œARGOEnqueueœ, œidœ: œARGOEnqueue-tDKiq5œ, œnameœ: œtask_infoœ, œoutput_typesœ: [œDataœ]}-ARGONextStep-us1x8L{œfieldNameœ: œtask_idœ, œidœ: œARGONextStep-us1x8Lœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "ARGONextStep-us1x8L",
         "target": "OllamaModel-8dOdOt",
-        "sourceHandle": "{\"dataType\":\"ARGONextStep\",\"id\":\"ARGONextStep-us1x8L\",\"name\":\"step\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"input_value\",\"id\":\"OllamaModel-8dOdOt\",\"inputTypes\":[\"Message\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGONextStepœ, œidœ: œARGONextStep-us1x8Lœ, œnameœ: œstepœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œinput_valueœ, œidœ: œOllamaModel-8dOdOtœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGONextStep",
@@ -562,16 +594,18 @@
             "inputTypes": [
               "Message"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGONextStep-us1x8Lstep-OllamaModel-8dOdOtinput_value"
+        "id": "xy-edge__ARGONextStep-us1x8L{œdataTypeœ: œARGONextStepœ, œidœ: œARGONextStep-us1x8Lœ, œnameœ: œstepœ, œoutput_typesœ: [œDataœ]}-OllamaModel-8dOdOt{œfieldNameœ: œinput_valueœ, œidœ: œOllamaModel-8dOdOtœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "OllamaModel-8dOdOt",
         "target": "ARGOSubmitResult-z9GzcA",
-        "sourceHandle": "{\"dataType\":\"OllamaModel\",\"id\":\"OllamaModel-8dOdOt\",\"name\":\"text_output\",\"output_types\":[\"Message\"]}",
-        "targetHandle": "{\"fieldName\":\"response\",\"id\":\"ARGOSubmitResult-z9GzcA\",\"inputTypes\":[\"Message\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œOllamaModelœ, œidœ: œOllamaModel-8dOdOtœ, œnameœ: œtext_outputœ, œoutput_typesœ: [œMessageœ]}",
+        "targetHandle": "{œfieldNameœ: œresponseœ, œidœ: œARGOSubmitResult-z9GzcAœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "OllamaModel",
@@ -587,16 +621,18 @@
             "inputTypes": [
               "Message"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-OllamaModel-8dOdOttext_output-ARGOSubmitResult-z9GzcAresponse"
+        "id": "xy-edge__OllamaModel-8dOdOt{œdataTypeœ: œOllamaModelœ, œidœ: œOllamaModel-8dOdOtœ, œnameœ: œtext_outputœ, œoutput_typesœ: [œMessageœ]}-ARGOSubmitResult-z9GzcA{œfieldNameœ: œresponseœ, œidœ: œARGOSubmitResult-z9GzcAœ, œinputTypesœ: [œMessageœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "ARGONextStep-us1x8L",
         "target": "ARGOSubmitResult-z9GzcA",
-        "sourceHandle": "{\"dataType\":\"ARGONextStep\",\"id\":\"ARGONextStep-us1x8L\",\"name\":\"step\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"task_id\",\"id\":\"ARGOSubmitResult-z9GzcA\",\"inputTypes\":[\"Data\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGONextStepœ, œidœ: œARGONextStep-us1x8Lœ, œnameœ: œstepœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œtask_idœ, œidœ: œARGOSubmitResult-z9GzcAœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGONextStep",
@@ -612,16 +648,18 @@
             "inputTypes": [
               "Data"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGONextStep-us1x8Lstep-ARGOSubmitResult-z9GzcAtask_id"
+        "id": "xy-edge__ARGONextStep-us1x8L{œdataTypeœ: œARGONextStepœ, œidœ: œARGONextStep-us1x8Lœ, œnameœ: œstepœ, œoutput_typesœ: [œDataœ]}-ARGOSubmitResult-z9GzcA{œfieldNameœ: œtask_idœ, œidœ: œARGOSubmitResult-z9GzcAœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "ARGOSubmitResult-z9GzcA",
         "target": "ARGONextStep-us1x8L",
-        "sourceHandle": "{\"dataType\":\"ARGOSubmitResult\",\"id\":\"ARGOSubmitResult-z9GzcA\",\"name\":\"continue_out\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"task_id\",\"id\":\"ARGONextStep-us1x8L\",\"inputTypes\":[\"Data\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGOSubmitResultœ, œidœ: œARGOSubmitResult-z9GzcAœ, œnameœ: œcontinue_outœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œtask_idœ, œidœ: œARGONextStep-us1x8Lœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGOSubmitResult",
@@ -637,16 +675,18 @@
             "inputTypes": [
               "Data"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGOSubmitResult-z9GzcAcontinue_out-ARGONextStep-us1x8Ltask_id"
+        "id": "xy-edge__ARGOSubmitResult-z9GzcA{œdataTypeœ: œARGOSubmitResultœ, œidœ: œARGOSubmitResult-z9GzcAœ, œnameœ: œcontinue_outœ, œoutput_typesœ: [œDataœ]}-ARGONextStep-us1x8L{œfieldNameœ: œtask_idœ, œidœ: œARGONextStep-us1x8Lœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       },
       {
         "source": "ARGOSubmitResult-z9GzcA",
         "target": "ARGOToolRouter-vwSkob",
-        "sourceHandle": "{\"dataType\":\"ARGOSubmitResult\",\"id\":\"ARGOSubmitResult-z9GzcA\",\"name\":\"invoke_tool_out\",\"output_types\":[\"Data\"]}",
-        "targetHandle": "{\"fieldName\":\"invoke_payload\",\"id\":\"ARGOToolRouter-vwSkob\",\"inputTypes\":[\"Data\"],\"type\":\"other\"}",
+        "sourceHandle": "{œdataTypeœ: œARGOSubmitResultœ, œidœ: œARGOSubmitResult-z9GzcAœ, œnameœ: œinvoke_tool_outœ, œoutput_typesœ: [œDataœ]}",
+        "targetHandle": "{œfieldNameœ: œinvoke_payloadœ, œidœ: œARGOToolRouter-vwSkobœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
         "data": {
           "sourceHandle": {
             "dataType": "ARGOSubmitResult",
@@ -662,10 +702,12 @@
             "inputTypes": [
               "Data"
             ],
-            "type": "other"
+            "type": "str"
           }
         },
-        "id": "reactflow__edge-ARGOSubmitResult-z9GzcAinvoke_tool_out-ARGOToolRouter-vwSkobinvoke_payload"
+        "id": "xy-edge__ARGOSubmitResult-z9GzcA{œdataTypeœ: œARGOSubmitResultœ, œidœ: œARGOSubmitResult-z9GzcAœ, œnameœ: œinvoke_tool_outœ, œoutput_typesœ: [œDataœ]}-ARGOToolRouter-vwSkob{œfieldNameœ: œinvoke_payloadœ, œidœ: œARGOToolRouter-vwSkobœ, œinputTypesœ: [œDataœ], œtypeœ: œstrœ}",
+        "animated": false,
+        "selected": false
       }
     ],
     "viewport": {
