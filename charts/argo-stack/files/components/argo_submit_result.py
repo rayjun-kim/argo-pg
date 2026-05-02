@@ -18,7 +18,7 @@ from langflow.custom import Component
 from langflow.io import IntInput, MessageTextInput, BoolInput, Output
 from langflow.schema import Data
 
-from ._argo_db import call_function
+from _argo_db import call_function
 
 
 class ARGOSubmitResult(Component):

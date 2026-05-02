@@ -9,7 +9,7 @@ from langflow.custom import Component
 from langflow.io import MessageTextInput, IntInput, Output
 from langflow.schema import Data
 
-from ._argo_db import call_function
+from _argo_db import call_function
 
 
 class ARGOEnqueue(Component):

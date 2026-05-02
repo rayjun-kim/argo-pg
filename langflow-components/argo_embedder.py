@@ -20,7 +20,7 @@ from langflow.custom import Component
 from langflow.io import IntInput, Output
 from langflow.schema import Data
 
-from ._argo_db import call_function_all, execute, vector_literal
+from _argo_db import call_function_all, execute, vector_literal
 
 
 class ARGOEmbedder(Component):

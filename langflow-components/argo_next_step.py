@@ -14,7 +14,7 @@ from langflow.custom import Component
 from langflow.io import IntInput, DataInput, Output
 from langflow.schema import Data
 
-from ._argo_db import call_function, vector_literal
+from _argo_db import call_function, vector_literal
 
 
 class ARGONextStep(Component):
