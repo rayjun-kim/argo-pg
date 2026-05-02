@@ -30,8 +30,12 @@ Langflow UI:
   Service: {{ include "argo-stack.langflowService" . }}.{{ $ns }}.svc:{{ .Values.langflow.service.port }}
 
   Quick local access:
+    {{- if eq .Values.langflow.service.type "NodePort" }}
+    open http://localhost:{{ .Values.langflow.service.nodePort }}
+    {{- else }}
     kubectl -n {{ $ns }} port-forward svc/{{ include "argo-stack.langflowService" . }} {{ .Values.langflow.service.port }}:{{ .Values.langflow.service.port }}
     open http://localhost:{{ .Values.langflow.service.port }}
+    {{- end }}
 
   {{- if .Values.langflow.auth.enabled }}
   Login:

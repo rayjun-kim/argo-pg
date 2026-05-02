@@ -43,6 +43,9 @@ spec:
       port: {{ .Values.langflow.service.port }}
       targetPort: 7860
       protocol: TCP
+      {{- if and (eq .Values.langflow.service.type "NodePort") .Values.langflow.service.nodePort }}
+      nodePort: {{ .Values.langflow.service.nodePort }}
+      {{- end }}
   selector:
     {{- include "argo-stack.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: langflow

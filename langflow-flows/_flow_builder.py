@@ -430,7 +430,7 @@ def node_argo_embedder(position: tuple[float, float]) -> dict[str, Any]:
 
 
 def node_ollama(position: tuple[float, float],
-                base_url: str = "http://argo-ollama:11434",
+                base_url: str = "http://argo-argo-stack-ollama:11434",
                 model_name: str = "llama3.2") -> dict[str, Any]:
     """Built-in Langflow Ollama component (LCModelComponent).
 
@@ -450,10 +450,9 @@ def node_ollama(position: tuple[float, float],
             "type": "str", "required": True, "show": True,
             "value": model_name, "name": "model_name",
             "display_name": "Model Name",
-            "info": "Model tag to use (e.g. llama3.2, qwen2.5).",
-            "_input_type": "DropdownInput",
-            "options": [],
-            "combobox": True,
+            "info": "Model tag to use (e.g. gemma4:e2b, llama3.2).",
+            "_input_type": "MessageTextInput",
+            "input_types": ["Message"],
         },
         "temperature": {
             "type": "float", "required": False, "show": True,

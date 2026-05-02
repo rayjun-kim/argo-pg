@@ -214,7 +214,7 @@
                 "type": "str",
                 "required": true,
                 "show": true,
-                "value": "http://argo-ollama:11434",
+                "value": "http://argo-argo-stack-ollama:11434",
                 "name": "base_url",
                 "display_name": "Base URL",
                 "info": "Ollama server URL.",
@@ -227,13 +227,14 @@
                 "type": "str",
                 "required": true,
                 "show": true,
-                "value": "llama3.2",
+                "value": "gemma4:e2b",
                 "name": "model_name",
                 "display_name": "Model Name",
-                "info": "Model tag to use (e.g. llama3.2, qwen2.5).",
-                "_input_type": "DropdownInput",
-                "options": [],
-                "combobox": true
+                "info": "Model tag to use (e.g. gemma4:e2b, llama3.2).",
+                "_input_type": "MessageTextInput",
+                "input_types": [
+                  "Message"
+                ]
               },
               "temperature": {
                 "type": "float",
@@ -558,7 +559,7 @@
                 "type": "str",
                 "required": true,
                 "show": true,
-                "value": "http://argo-ollama:11434",
+                "value": "http://argo-argo-stack-ollama:11434",
                 "name": "base_url",
                 "display_name": "Base URL",
                 "info": "Ollama server URL.",
@@ -571,13 +572,14 @@
                 "type": "str",
                 "required": true,
                 "show": true,
-                "value": "llama3.2",
+                "value": "gemma4:e2b",
                 "name": "model_name",
                 "display_name": "Model Name",
-                "info": "Model tag to use (e.g. llama3.2, qwen2.5).",
-                "_input_type": "DropdownInput",
-                "options": [],
-                "combobox": true
+                "info": "Model tag to use (e.g. gemma4:e2b, llama3.2).",
+                "_input_type": "MessageTextInput",
+                "input_types": [
+                  "Message"
+                ]
               },
               "temperature": {
                 "type": "float",

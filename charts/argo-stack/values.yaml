@@ -136,8 +136,9 @@ langflow:
     pullPolicy: IfNotPresent
 
   service:
-    type: ClusterIP
+    type: NodePort
     port: 7860
+    nodePort: 30860   # Access Langflow at http://<node-ip>:30860
 
   # Set to LoadBalancer or NodePort to expose externally, or enable ingress.
   ingress:
