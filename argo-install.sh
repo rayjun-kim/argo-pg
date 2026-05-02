@@ -7,6 +7,8 @@
 #
 # Commands:
 #   install              Install CNPG (if not present) + ARGO stack
+#   reinstall            Remove and reinstall ARGO only (CNPG untouched)
+#   upgrade              Upgrade ARGO to latest chart version (CNPG untouched)
 #   uninstall            Remove ARGO stack only (CNPG and CRDs untouched)
 #   uninstall --all      Remove ARGO + CNPG operator + all CRDs
 #   status               Show current installation status
@@ -47,17 +49,19 @@ Usage:
   $(basename "$0") [COMMAND] [FLAGS]
 
 Commands:
-  install              Install ARGO stack
-                       (installs CNPG automatically if not already present)
-  uninstall            Remove ARGO stack only
-                       (CNPG operator and CRDs are left untouched)
-  uninstall --all      Remove ARGO + CNPG operator + all CNPG CRDs
-                       (use only when no other workloads depend on CNPG)
+  install              Install CNPG Operator (if not present) + ARGO stack
+  reinstall            Remove and reinstall ARGO only (CNPG untouched)
+  upgrade              Upgrade ARGO to latest chart version (CNPG untouched)
+  uninstall            Remove ARGO stack only (CNPG and CRDs untouched)
+  uninstall --all      Remove ARGO + CNPG operator + all CRDs
+                       (only when no other workloads depend on CNPG)
   status               Show current installation status
   help                 Show this help message
 
 Examples:
-  $(basename "$0") install            # Install everything
+  $(basename "$0") install            # Fresh install
+  $(basename "$0") reinstall          # Reinstall ARGO only
+  $(basename "$0") upgrade            # Upgrade ARGO to latest version
   $(basename "$0") uninstall          # Remove ARGO only (safe for shared clusters)
   $(basename "$0") uninstall --all    # Remove everything including CNPG
   $(basename "$0") status             # Check current status
@@ -65,7 +69,7 @@ Examples:
 What gets installed:
   - CloudNativePG Operator      (cnpg-system, skipped if already installed)
   - PostgreSQL + ARGO schema    (argo namespace)
-  - Ollama (gemma4:e2b + nomic-embed-text)
+  - Ollama (gemma4:e2b + nomic-embed-text, pulled async)
   - Langflow with ARGO components and starter flows
 
 Requirements:
@@ -124,25 +128,63 @@ check_prerequisites() {
 }
 
 # =============================================================================
-# CNPG availability check
+# CNPG check
 # =============================================================================
 cnpg_is_installed() {
-    # Returns 0 (true) if CNPG operator is already running in the cluster
     kubectl get deployment -n "$CNPG_NAMESPACE" \
         -l app.kubernetes.io/name=cloudnative-pg \
         --no-headers 2>/dev/null | grep -q .
 }
 
-cnpg_crd_exists() {
-    kubectl get crd clusters.postgresql.cnpg.io > /dev/null 2>&1
+# =============================================================================
+# Wait for Langflow to be ready
+# =============================================================================
+wait_for_langflow() {
+    info "Waiting for Langflow to be ready..."
+    local svc="${ARGO_RELEASE}-argo-stack-langflow"
+    local pod
+
+    # Wait for pod to be running
+    kubectl rollout status deployment/${svc} \
+        -n "$ARGO_NAMESPACE" --timeout=5m
+
+    # Wait for health endpoint
+    pod=$(kubectl get pod -n "$ARGO_NAMESPACE" \
+        -l app.kubernetes.io/component=langflow \
+        -o name | head -1)
+
+    for i in $(seq 1 60); do
+        if kubectl exec -n "$ARGO_NAMESPACE" "$pod" -- \
+            curl -sf http://localhost:7860/health > /dev/null 2>&1; then
+            info "Langflow ready."
+            return 0
+        fi
+        echo -n "."
+        sleep 5
+    done
+    echo ""
+    warn "Langflow health check timed out — continuing anyway."
 }
 
 # =============================================================================
-# Remove ARGO only
+# Run post-install/upgrade hooks
 # =============================================================================
-remove_argo_only() {
-    step "Removing ARGO stack (CNPG and CRDs will not be touched)"
+run_hooks() {
+    step "Running post-install setup (roles, seed data, flow import)"
+    wait_for_langflow
+    helm upgrade "$ARGO_RELEASE" argo/argo-stack \
+        --namespace "$ARGO_NAMESPACE" \
+        --set cloudnative-pg.enabled=false \
+        --reuse-values \
+        --wait \
+        --timeout 5m
+    info "Post-install setup complete."
+}
 
+# =============================================================================
+# Cleanup ARGO only
+# =============================================================================
+cleanup_argo() {
     kubectl delete secret ${ARGO_RELEASE}-argo-stack-argo-passwords \
         -n "$ARGO_NAMESPACE" 2>/dev/null && \
         info "Removed Secret: argo-passwords." || true
@@ -162,8 +204,6 @@ remove_argo_only() {
         sleep 2
     done
     echo ""
-
-    info "ARGO removed. CNPG operator and CRDs are intact."
 }
 
 # =============================================================================
@@ -206,8 +246,166 @@ remove_cnpg() {
 }
 
 # =============================================================================
-# Uninstall
+# Install ARGO stack (assumes CNPG already ready)
 # =============================================================================
+install_argo() {
+    step "Installing ARGO stack"
+    helm install "$ARGO_RELEASE" argo/argo-stack \
+        --namespace "$ARGO_NAMESPACE" \
+        --create-namespace \
+        --set cloudnative-pg.enabled=false
+
+    step "Waiting for core components"
+
+    info "Waiting for PostgreSQL..."
+    kubectl wait pod \
+        -l "cnpg.io/cluster=${ARGO_RELEASE}-argo-stack-argo-pg" \
+        -n "$ARGO_NAMESPACE" \
+        --for=condition=ready --timeout=5m
+
+    info "Waiting for Ollama..."
+    kubectl rollout status deployment/${ARGO_RELEASE}-argo-stack-ollama \
+        -n "$ARGO_NAMESPACE" --timeout=5m
+
+    run_hooks
+}
+
+# =============================================================================
+# Print summary
+# =============================================================================
+print_summary() {
+    echo ""
+    step "Pod Status"
+    kubectl get pods -n "$ARGO_NAMESPACE"
+
+    echo ""
+    step "Job Status"
+    kubectl get jobs -n "$ARGO_NAMESPACE" 2>/dev/null || true
+
+    echo ""
+    echo -e "${GREEN}${BOLD}=========================================="
+    echo "ARGO Stack ready!"
+    echo -e "==========================================${NC}"
+    echo ""
+    echo "Access Langflow:"
+    echo "  kubectl -n ${ARGO_NAMESPACE} port-forward svc/${ARGO_RELEASE}-argo-stack-langflow 7860:7860"
+    echo "  open http://localhost:7860"
+    echo ""
+    echo "Check model download progress (background):"
+    echo "  kubectl logs -n ${ARGO_NAMESPACE} -l app.kubernetes.io/component=ollama-model-pull -f"
+    echo ""
+    echo "Check PostgreSQL:"
+    echo "  kubectl exec -n ${ARGO_NAMESPACE} ${ARGO_RELEASE}-argo-stack-argo-pg-1 -- \\"
+    echo "    psql -U postgres -d argo -c 'SELECT * FROM argo_public.v_session_progress;'"
+    echo ""
+}
+
+# =============================================================================
+# Commands
+# =============================================================================
+do_install() {
+    step "Starting fresh ARGO stack installation"
+
+    # Clean up existing ARGO
+    step "Cleaning up existing ARGO installation"
+    cleanup_argo
+    info "Cleanup complete."
+
+    # Helm repos
+    step "Setting up Helm repositories"
+    helm repo add argo  "$ARGO_REPO_URL"  2>/dev/null || true
+    helm repo add cnpg  "$CNPG_REPO_URL" 2>/dev/null || true
+    helm repo update
+    info "Helm repos updated."
+
+    # CNPG — install only if not present
+    step "Checking CloudNativePG Operator"
+    if cnpg_is_installed; then
+        info "CNPG Operator already installed — skipping."
+    else
+        info "CNPG Operator not found — installing..."
+        helm install "$CNPG_RELEASE" cnpg/cloudnative-pg \
+            --namespace "$CNPG_NAMESPACE" \
+            --create-namespace \
+            --wait \
+            --timeout 5m
+        info "CNPG Operator installed."
+    fi
+
+    kubectl wait --for=condition=established \
+        crd/clusters.postgresql.cnpg.io \
+        --timeout=60s
+    info "CNPG CRDs ready."
+
+    install_argo
+    print_summary
+}
+
+do_reinstall() {
+    step "Reinstalling ARGO stack (CNPG untouched)"
+
+    echo ""
+    warn "This will remove and reinstall ARGO only."
+    echo "  CNPG Operator and CRDs will NOT be touched."
+    echo ""
+    read -r -p "Are you sure? [y/N] " confirm
+    case "$confirm" in
+        [yY][eE][sS]|[yY]) ;;
+        *) info "Aborted."; exit 0 ;;
+    esac
+
+    step "Removing existing ARGO installation"
+    cleanup_argo
+    info "Cleanup complete."
+
+    step "Setting up Helm repositories"
+    helm repo add argo "$ARGO_REPO_URL" 2>/dev/null || true
+    helm repo update
+    info "Helm repos updated."
+
+    kubectl wait --for=condition=established \
+        crd/clusters.postgresql.cnpg.io \
+        --timeout=60s
+
+    install_argo
+    print_summary
+}
+
+do_upgrade() {
+    step "Upgrading ARGO stack to latest version (CNPG untouched)"
+
+    step "Setting up Helm repositories"
+    helm repo add argo "$ARGO_REPO_URL" 2>/dev/null || true
+    helm repo update
+
+    local current
+    current=$(helm list -n "$ARGO_NAMESPACE" --filter "^${ARGO_RELEASE}$" \
+        -o json 2>/dev/null | python3 -c \
+        "import json,sys; d=json.load(sys.stdin); print(d[0]['chart'] if d else 'not installed')" \
+        2>/dev/null || echo "unknown")
+    info "Current: ${current}"
+
+    local latest
+    latest=$(helm search repo argo/argo-stack --output json 2>/dev/null | \
+        python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['version'] if d else 'unknown')" \
+        2>/dev/null || echo "unknown")
+    info "Latest:  argo-stack-${latest}"
+
+    helm upgrade "$ARGO_RELEASE" argo/argo-stack \
+        --namespace "$ARGO_NAMESPACE" \
+        --set cloudnative-pg.enabled=false \
+        --reuse-values
+
+    step "Waiting for rollout"
+    kubectl rollout status deployment/${ARGO_RELEASE}-argo-stack-langflow \
+        -n "$ARGO_NAMESPACE" --timeout=5m
+    kubectl rollout status deployment/${ARGO_RELEASE}-argo-stack-ollama \
+        -n "$ARGO_NAMESPACE" --timeout=5m
+
+    run_hooks
+    print_summary
+}
+
 do_uninstall() {
     local remove_all="${1:-}"
 
@@ -218,12 +416,12 @@ do_uninstall() {
         echo "  - CNPG Operator (${CNPG_NAMESPACE} namespace)"
         echo "  - All CNPG CRDs (affects ALL clusters using CNPG)"
         echo ""
-        warn "Only use --all when no other workloads in this cluster depend on CNPG."
+        warn "Only use --all when no other workloads depend on CNPG."
     else
         echo ""
-        warn "This will remove ARGO resources:"
-        echo "  - Helm release '${ARGO_RELEASE}' in namespace '${ARGO_NAMESPACE}'"
-        echo "  - All PVCs in the argo namespace (PostgreSQL data, Ollama models, Langflow data)"
+        warn "This will remove ARGO resources only:"
+        echo "  - Helm release '${ARGO_RELEASE}' (${ARGO_NAMESPACE} namespace)"
+        echo "  - All PVCs (PostgreSQL data, Ollama models, Langflow data)"
         echo ""
         info "CNPG Operator and CRDs will NOT be touched."
     fi
@@ -235,7 +433,7 @@ do_uninstall() {
         *) info "Aborted."; exit 0 ;;
     esac
 
-    remove_argo_only
+    cleanup_argo
 
     if [ "$remove_all" = "--all" ]; then
         remove_cnpg
@@ -244,9 +442,6 @@ do_uninstall() {
     info "Uninstall complete."
 }
 
-# =============================================================================
-# Status
-# =============================================================================
 do_status() {
     step "ARGO Stack Status"
 
@@ -284,126 +479,6 @@ do_status() {
 }
 
 # =============================================================================
-# Install
-# =============================================================================
-do_install() {
-    step "Starting ARGO stack installation"
-
-    # Clean up existing ARGO installation only
-    step "Cleaning up existing ARGO installation"
-
-    kubectl delete secret ${ARGO_RELEASE}-argo-stack-argo-passwords \
-        -n "$ARGO_NAMESPACE" 2>/dev/null && \
-        info "Removed Secret: argo-passwords." || true
-
-    helm uninstall "$ARGO_RELEASE" -n "$ARGO_NAMESPACE" --no-hooks 2>/dev/null && \
-        info "Removed existing ARGO release." || true
-
-    kubectl delete namespace "$ARGO_NAMESPACE" --force --grace-period=0 2>/dev/null && \
-        info "Deleted namespace: ${ARGO_NAMESPACE}" || true
-
-    info "Waiting for namespace to terminate..."
-    for i in $(seq 1 30); do
-        if ! kubectl get namespace "$ARGO_NAMESPACE" > /dev/null 2>&1; then
-            break
-        fi
-        echo -n "."
-        sleep 2
-    done
-    echo ""
-    info "Cleanup complete."
-
-    # Helm repos
-    step "Setting up Helm repositories"
-    helm repo add argo  "$ARGO_REPO_URL"  2>/dev/null || true
-    helm repo add cnpg  "$CNPG_REPO_URL" 2>/dev/null || true
-    helm repo update
-    info "Helm repos updated."
-
-    # CNPG Operator — install only if not already present
-    step "Checking CloudNativePG Operator"
-    if cnpg_is_installed; then
-        info "CNPG Operator already installed — skipping."
-    else
-        info "CNPG Operator not found — installing..."
-        helm install "$CNPG_RELEASE" cnpg/cloudnative-pg \
-            --namespace "$CNPG_NAMESPACE" \
-            --create-namespace \
-            --wait \
-            --timeout 5m
-        info "CNPG Operator installed."
-    fi
-
-    info "Waiting for CNPG CRDs to be established..."
-    kubectl wait --for=condition=established \
-        crd/clusters.postgresql.cnpg.io \
-        --timeout=60s
-    info "CNPG ready."
-
-    # ARGO stack
-    step "Installing ARGO stack"
-    helm install "$ARGO_RELEASE" argo/argo-stack \
-        --namespace "$ARGO_NAMESPACE" \
-        --create-namespace \
-        --set cloudnative-pg.enabled=false
-
-    # Wait for core components
-    step "Waiting for core components"
-
-    info "Waiting for PostgreSQL..."
-    kubectl wait pod \
-        -l "cnpg.io/cluster=${ARGO_RELEASE}-argo-stack-argo-pg" \
-        -n "$ARGO_NAMESPACE" \
-        --for=condition=ready --timeout=5m
-
-    info "Waiting for Langflow..."
-    kubectl rollout status deployment/${ARGO_RELEASE}-argo-stack-langflow \
-        -n "$ARGO_NAMESPACE" --timeout=5m
-
-    info "Waiting for Ollama..."
-    kubectl rollout status deployment/${ARGO_RELEASE}-argo-stack-ollama \
-        -n "$ARGO_NAMESPACE" --timeout=5m
-
-    info "Core components ready."
-
-    # Post-install hooks (roles, seed, langflow-import)
-    step "Running post-install setup"
-    helm upgrade "$ARGO_RELEASE" argo/argo-stack \
-        --namespace "$ARGO_NAMESPACE" \
-        --set cloudnative-pg.enabled=false \
-        --reuse-values \
-        --wait \
-        --timeout 5m
-    info "Post-install setup complete."
-
-    # Summary
-    echo ""
-    step "Pod Status"
-    kubectl get pods -n "$ARGO_NAMESPACE"
-
-    echo ""
-    step "Job Status"
-    kubectl get jobs -n "$ARGO_NAMESPACE" 2>/dev/null || true
-
-    echo ""
-    echo -e "${GREEN}${BOLD}=========================================="
-    echo "ARGO Stack installed successfully!"
-    echo -e "==========================================${NC}"
-    echo ""
-    echo "Access Langflow:"
-    echo "  kubectl -n ${ARGO_NAMESPACE} port-forward svc/${ARGO_RELEASE}-argo-stack-langflow 7860:7860"
-    echo "  open http://localhost:7860"
-    echo ""
-    echo "Check model download progress (background):"
-    echo "  kubectl logs -n ${ARGO_NAMESPACE} -l app.kubernetes.io/component=ollama-model-pull -f"
-    echo ""
-    echo "Check PostgreSQL:"
-    echo "  kubectl exec -n ${ARGO_NAMESPACE} ${ARGO_RELEASE}-argo-stack-argo-pg-1 -- \\"
-    echo "    psql -U postgres -d argo -c 'SELECT * FROM argo_public.v_session_progress;'"
-    echo ""
-}
-
-# =============================================================================
 # Main
 # =============================================================================
 COMMAND="${1:-install}"
@@ -413,6 +488,14 @@ case "$COMMAND" in
     install)
         check_prerequisites
         do_install
+        ;;
+    reinstall)
+        check_prerequisites
+        do_reinstall
+        ;;
+    upgrade)
+        check_prerequisites
+        do_upgrade
         ;;
     uninstall)
         check_prerequisites
