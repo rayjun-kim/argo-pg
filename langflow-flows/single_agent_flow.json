@@ -20,7 +20,6 @@
             "description": "Enqueue a task for an ARGO agent.",
             "icon": "play",
             "template": {
-              "_type": "Component",
               "agent_role": {
                 "type": "str",
                 "required": true,
@@ -124,7 +123,6 @@
             "description": "Ask ARGO what to do next for a task.",
             "icon": "step-forward",
             "template": {
-              "_type": "Component",
               "task_info": {
                 "type": "other",
                 "required": false,
@@ -239,7 +237,6 @@
             "description": "Generate text using a local Ollama model.",
             "icon": "Ollama",
             "template": {
-              "_type": "Component",
               "base_url": {
                 "type": "str",
                 "required": true,
@@ -351,7 +348,6 @@
             "description": "Submit LLM response. Routes to the matching action port.",
             "icon": "send",
             "template": {
-              "_type": "Component",
               "task_info": {
                 "type": "other",
                 "required": false,
@@ -515,7 +511,6 @@
             "description": "Routes invoke_tool payloads by tool_type.",
             "icon": "git-branch",
             "template": {
-              "_type": "Component",
               "invoke_payload": {
                 "type": "other",
                 "required": true,

@@ -40,18 +40,16 @@ spec:
                 sleep 5
               done
 
-              # Get auth token
+              # Get auth token — use jq for robust JSON parsing (handles spaces after colon)
               echo "Getting auth token..."
               TOKEN=$(curl -s "$BASE/api/v1/auto_login" \
-                | grep -o '"access_token":"[^"]*"' \
-                | cut -d'"' -f4)
+                | jq -r '.access_token // empty' 2>/dev/null)
 
               if [ -z "$TOKEN" ]; then
                 TOKEN=$(curl -s -X POST "$BASE/api/v1/login" \
                   -H "Content-Type: application/x-www-form-urlencoded" \
                   -d "username=admin&password=admin" \
-                  | grep -o '"access_token":"[^"]*"' \
-                  | cut -d'"' -f4)
+                  | jq -r '.access_token // empty' 2>/dev/null)
               fi
 
               if [ -z "$TOKEN" ]; then
@@ -62,7 +60,7 @@ spec:
 
               # Delete existing ARGO flows first (so we always upload fresh)
               echo "Removing existing ARGO flows..."
-              curl -s --compressed "$BASE/api/v1/flows/?page=1&size=100" \
+              curl -s "$BASE/api/v1/flows/" \
                 -H "Authorization: Bearer $TOKEN" \
                 -o /tmp/existing_flows.json
 
@@ -71,19 +69,24 @@ spec:
                    .[] | select(.name | startswith("ARGO")) | .id' \
                   /tmp/existing_flows.json 2>/dev/null); do
                 echo "  Deleting flow: $flow_id"
-                curl -s -X DELETE "$BASE/api/v1/flows/$flow_id" \
-                  -H "Authorization: Bearer $TOKEN" > /dev/null
+                http_del=$(curl -s -o /dev/null -w "%{http_code}" \
+                  -X DELETE "$BASE/api/v1/flows/$flow_id" \
+                  -H "Authorization: Bearer $TOKEN")
+                echo "    -> HTTP $http_del"
               done
 
               # Upload all flows fresh
               for f in /flows/*.json; do
-                FLOW_NAME=$(grep -o '"name":"[^"]*"' "$f" | head -1 | cut -d'"' -f4)
+                FLOW_NAME=$(jq -r '.name // "unknown"' "$f" 2>/dev/null)
                 echo "Uploading '$FLOW_NAME'..."
-                code=$(curl -s -o /dev/null -w "%{http_code}" \
+                code=$(curl -s -o /tmp/upload_resp.json -w "%{http_code}" \
                   -X POST "$BASE/api/v1/flows/upload/" \
                   -H "Authorization: Bearer $TOKEN" \
                   -F "file=@${f}")
                 echo "  -> HTTP $code"
+                if [ "$code" != "201" ] && [ "$code" != "200" ]; then
+                  echo "  WARN: $(cat /tmp/upload_resp.json 2>/dev/null | head -c 300)"
+                fi
               done
 
               echo "Import complete."
