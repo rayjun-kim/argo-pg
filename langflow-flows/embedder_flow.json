@@ -20,6 +20,7 @@
             "description": "Re-embed rows whose vectors don't match the active model.",
             "icon": "refresh-cw",
             "template": {
+              "_type": "Component",
               "batch_size": {
                 "type": "int",
                 "required": false,
