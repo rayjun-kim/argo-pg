@@ -44,25 +44,25 @@ def build_single_agent_flow() -> None:
     router    = node_argo_tool_router((1500,  -150))
 
     edges = [
-        # Enqueue.task_info -> NextStep.task_id
+        # Enqueue.task_info -> NextStep.task_info  (Data -> DataInput)
         make_edge(source_node=enqueue, source_output_name="task_info",
-                  target_node=next_step, target_input_name="task_id"),
+                  target_node=next_step, target_input_name="task_info"),
 
-        # NextStep.step -> Ollama.input_value (LLM consumes the messages)
-        make_edge(source_node=next_step, source_output_name="step",
+        # NextStep.prompt -> Ollama.input_value  (Message -> MessageTextInput)
+        make_edge(source_node=next_step, source_output_name="prompt",
                   target_node=ollama, target_input_name="input_value"),
 
-        # Ollama.text_output -> SubmitResult.response
+        # Ollama.text_output -> SubmitResult.response  (Message -> MessageTextInput)
         make_edge(source_node=ollama, source_output_name="text_output",
                   target_node=submit, target_input_name="response"),
 
-        # NextStep.step -> SubmitResult.task_id (so submit knows the task)
+        # NextStep.step -> SubmitResult.task_info  (Data -> DataInput; carries task_id)
         make_edge(source_node=next_step, source_output_name="step",
-                  target_node=submit, target_input_name="task_id"),
+                  target_node=submit, target_input_name="task_info"),
 
-        # SubmitResult.continue_out -> NextStep.task_id (loop)
+        # SubmitResult.continue_out -> NextStep.task_info  (Data -> DataInput; loop)
         make_edge(source_node=submit, source_output_name="continue_out",
-                  target_node=next_step, target_input_name="task_id"),
+                  target_node=next_step, target_input_name="task_info"),
 
         # SubmitResult.invoke_tool_out -> ToolRouter.invoke_payload
         make_edge(source_node=submit, source_output_name="invoke_tool_out",
@@ -108,28 +108,28 @@ def build_multi_agent_flow() -> None:
     edges = [
         # ---- Orchestrator ----
         make_edge(source_node=orch_enq, source_output_name="task_info",
-                  target_node=orch_next, target_input_name="task_id"),
-        make_edge(source_node=orch_next, source_output_name="step",
+                  target_node=orch_next, target_input_name="task_info"),
+        make_edge(source_node=orch_next, source_output_name="prompt",
                   target_node=orch_llm, target_input_name="input_value"),
         make_edge(source_node=orch_llm, source_output_name="text_output",
                   target_node=orch_submit, target_input_name="response"),
         make_edge(source_node=orch_next, source_output_name="step",
-                  target_node=orch_submit, target_input_name="task_id"),
+                  target_node=orch_submit, target_input_name="task_info"),
         make_edge(source_node=orch_submit, source_output_name="continue_out",
-                  target_node=orch_next, target_input_name="task_id"),
+                  target_node=orch_next, target_input_name="task_info"),
         # delegate -> wait_tasks loops back to next_step once subtask completes
         make_edge(source_node=orch_submit, source_output_name="wait_tasks_out",
-                  target_node=orch_next, target_input_name="task_id"),
+                  target_node=orch_next, target_input_name="task_info"),
 
         # ---- Executor ----
-        make_edge(source_node=exec_next, source_output_name="step",
+        make_edge(source_node=exec_next, source_output_name="prompt",
                   target_node=exec_llm, target_input_name="input_value"),
         make_edge(source_node=exec_llm, source_output_name="text_output",
                   target_node=exec_submit, target_input_name="response"),
         make_edge(source_node=exec_next, source_output_name="step",
-                  target_node=exec_submit, target_input_name="task_id"),
+                  target_node=exec_submit, target_input_name="task_info"),
         make_edge(source_node=exec_submit, source_output_name="continue_out",
-                  target_node=exec_next, target_input_name="task_id"),
+                  target_node=exec_next, target_input_name="task_info"),
         # Executor invokes tools
         make_edge(source_node=exec_submit, source_output_name="invoke_tool_out",
                   target_node=router, target_input_name="invoke_payload"),

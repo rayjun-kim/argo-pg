@@ -102,5 +102,5 @@ spec:
             - name: OLLAMA_ENDPOINT
               value: {{ printf "http://%s:%d" (include "argo-stack.ollamaService" .) (int .Values.ollama.service.port) | quote }}
             - name: CHAT_MODEL
-{{- end }}
               value: {{ .Values.ollama.defaultChatModel | quote }}
+{{- end }}

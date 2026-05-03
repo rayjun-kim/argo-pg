@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from langflow.custom import Component
-from langflow.io import IntInput, MessageTextInput, BoolInput, Output
+from langflow.io import IntInput, DataInput, MessageTextInput, BoolInput, Output
 from langflow.schema import Data
 
 from _argo_db import call_function
@@ -31,11 +31,17 @@ class ARGOSubmitResult(Component):
     name = "ARGOSubmitResult"
 
     inputs = [
+        DataInput(
+            name="task_info",
+            display_name="Task Info",
+            info="Connect from ARGO Next Step's 'Step Data' output. task_id is extracted from it.",
+            required=False,
+        ),
         IntInput(
             name="task_id",
-            display_name="Task ID",
-            info="Task this response belongs to.",
-            required=True,
+            display_name="Task ID (manual)",
+            info="Used only when Task Info is not connected. Enter the task_id directly.",
+            required=False,
         ),
         MessageTextInput(
             name="response",
@@ -60,21 +66,30 @@ class ARGOSubmitResult(Component):
         Output(name="wait_approval_out",display_name="wait_approval",  method="route_wait_approval"),
     ]
 
-    # ---------------------------------------------------------------------
-    # Internal helper: call DB once, cache the parsed response on self.
-    # ---------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    def _resolve_task_id(self) -> int:
+        """Extract task_id from task_info Data, or fall back to the manual task_id field."""
+        ti = self.task_info
+        if ti is not None:
+            raw = ti.data if hasattr(ti, "data") else ti
+            if isinstance(raw, dict) and "task_id" in raw:
+                return int(raw["task_id"])
+        try:
+            return int(self.task_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "ARGOSubmitResult: provide a connected 'Task Info' or set 'Task ID' manually."
+            ) from exc
+
     def _submit(self) -> dict[str, Any]:
+        """Call DB once and cache the result."""
         cached = getattr(self, "_argo_result", None)
         if cached is not None:
             return cached
 
-        try:
-            task_id = int(self.task_id)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("ARGOSubmitResult: 'task_id' must be an integer.") from exc
+        task_id = self._resolve_task_id()
 
         response = self.response
-        # Allow Message/Data inputs in addition to plain strings.
         if hasattr(response, "text"):
             response = response.text
         if hasattr(response, "data") and isinstance(response.data, dict):
@@ -89,17 +104,15 @@ class ARGOSubmitResult(Component):
             raise RuntimeError(f"ARGOSubmitResult: unexpected response: {result!r}")
 
         self._argo_result = result
+        self._resolved_task_id = task_id
         self.status = f"action={result.get('action')}"
         return result
 
-    # ---------------------------------------------------------------------
-    # Five route methods. Each returns Data only if the action matches.
-    # ---------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def route_continue(self) -> Data | None:
         r = self._submit()
         if r.get("action") == "continue":
-            # Echo task_id so the next ARGO Next Step can use it directly.
-            return Data(data={"task_id": int(self.task_id), **r})
+            return Data(data={"task_id": self._resolved_task_id, **r})
         self.stop("continue_out")
         return None
 

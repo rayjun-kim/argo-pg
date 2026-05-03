@@ -253,7 +253,7 @@ def make_edge(
         "fieldName": target_input_name,
         "id": target_id,
         "inputTypes": input_types,
-        "type": "str",
+        "type": in_field.get("type", "str"),
     }
 
     sh_str = _encode_handle(source_handle_obj)
@@ -340,14 +340,21 @@ def node_argo_next_step(position: tuple[float, float]) -> dict[str, Any]:
         description="Ask ARGO what to do next for a task.",
         icon="step-forward",
         template={
-            "task_id":         _int_field("task_id", "Task ID", required=True),
+            "task_info":       _data_field("task_info", "Task Info",
+                                           info="Connect from ARGO Enqueue or Submit Result (loop)."),
+            "task_id":         _int_field("task_id", "Task ID (manual)",
+                                          info="Used only when Task Info is not connected.",
+                                          advanced=True),
             "query_embedding": _data_field("query_embedding", "Query Embedding",
                                            info="Optional embedding for memory injection.",
                                            advanced=True),
             "memory_limit":    _int_field("memory_limit", "Memory Limit",
                                           value=5, advanced=True),
         },
-        outputs=[_output("step", "Step", "next_step")],
+        outputs=[
+            _output("step",   "Step Data", "next_step"),
+            _output("prompt", "Prompt",    "format_prompt", types=["Message"]),
+        ],
         position=position,
     )
 
@@ -360,10 +367,14 @@ def node_argo_submit_result(position: tuple[float, float]) -> dict[str, Any]:
         description="Submit LLM response. Routes to the matching action port.",
         icon="send",
         template={
-            "task_id":  _int_field("task_id", "Task ID", required=True),
-            "response": _msg_text("response", "LLM Response",
-                                  info="The raw LLM output text."),
-            "is_final": _bool_field("is_final", "Force Final", value=False, advanced=True),
+            "task_info": _data_field("task_info", "Task Info",
+                                     info="Connect from ARGO Next Step's 'Step Data' output."),
+            "task_id":   _int_field("task_id", "Task ID (manual)",
+                                    info="Used only when Task Info is not connected.",
+                                    advanced=True),
+            "response":  _msg_text("response", "LLM Response",
+                                   info="The raw LLM output text."),
+            "is_final":  _bool_field("is_final", "Force Final", value=False, advanced=True),
         },
         outputs=[
             _output("continue_out",      "continue",      "route_continue"),
@@ -431,7 +442,7 @@ def node_argo_embedder(position: tuple[float, float]) -> dict[str, Any]:
 
 def node_ollama(position: tuple[float, float],
                 base_url: str = "http://argo-argo-stack-ollama:11434",
-                model_name: str = "llama3.2") -> dict[str, Any]:
+                model_name: str = "gemma4:e2b") -> dict[str, Any]:
     """Built-in Langflow Ollama component (LCModelComponent).
 
     No code embedding needed; Langflow ships with this class as `OllamaModel`.
