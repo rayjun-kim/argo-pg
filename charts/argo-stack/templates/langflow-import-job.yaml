@@ -29,6 +29,8 @@ spec:
               set -e
               BASE="http://${LANGFLOW_HOST}:${LANGFLOW_PORT}"
 
+              apk add --no-cache jq > /dev/null 2>&1
+
               echo "Waiting for Langflow..."
               for i in $(seq 1 60); do
                 if curl -sf "$BASE/health" > /dev/null 2>&1; then
@@ -64,10 +66,10 @@ spec:
                 -H "Authorization: Bearer $TOKEN" \
                 -o /tmp/existing_flows.json
 
-              for flow_id in $(cat /tmp/existing_flows.json \
-                | grep -o '"id":"[^"]*","name":"ARGO[^"]*"' \
-                | grep -o '"id":"[^"]*"' \
-                | cut -d'"' -f4); do
+              for flow_id in $(jq -r \
+                  'if type == "array" then . else (.items // .flows // []) end |
+                   .[] | select(.name | startswith("ARGO")) | .id' \
+                  /tmp/existing_flows.json 2>/dev/null); do
                 echo "  Deleting flow: $flow_id"
                 curl -s -X DELETE "$BASE/api/v1/flows/$flow_id" \
                   -H "Authorization: Bearer $TOKEN" > /dev/null

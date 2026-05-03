@@ -167,17 +167,11 @@ wait_for_langflow() {
 }
 
 # =============================================================================
-# Run post-install/upgrade hooks
+# Wait for post-install/upgrade hooks to settle
 # =============================================================================
 run_hooks() {
-    step "Running post-install setup (roles, seed data, flow import)"
+    step "Waiting for Langflow to be ready"
     wait_for_langflow
-    helm upgrade "$ARGO_RELEASE" argo/argo-stack \
-        --namespace "$ARGO_NAMESPACE" \
-        --set cloudnative-pg.enabled=false \
-        --reuse-values \
-        --wait \
-        --timeout 5m
     info "Post-install setup complete."
 }
 
