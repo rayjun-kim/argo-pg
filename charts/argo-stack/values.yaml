@@ -132,7 +132,7 @@ langflow:
 
   image:
     repository: langflowai/langflow
-    tag: "1.7.0"
+    tag: "1.9.1"
     pullPolicy: IfNotPresent
 
   service:
